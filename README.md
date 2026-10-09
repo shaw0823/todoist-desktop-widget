@@ -38,6 +38,14 @@
 
 颜色只保存在本机 `%LOCALAPPDATA%\TodoistDesktopWidget\theme.json`，不会随 GitHub 上传。
 
+## 壁纸与透明背景
+
+点击顶部 **◐** 打开外观设置。在“背景类型”中选择壁纸，再点击“选择图片”，可使用本机 JPG、PNG 或 BMP 图片。图片自动按比例铺满组件，圆角保持不变；壁纸遮罩使用当前背景颜色，可调节深浅以保持文字清晰。
+
+“背景不透明度”适用于纯色和壁纸：100% 为不透明，0% 为完全透明。也可直接点击“设为完全透明背景”。此设置仅影响背景，任务文字和操作保持清晰。修改会实时预览，保存后继续使用，取消会恢复原外观。
+
+默认保持纯色。壁纸路径和背景设置只保存在本机 `%LOCALAPPDATA%\TodoistDesktopWidget\background.json`，不会上传到 GitHub，也不会复制或修改所选图片。请保留原图片；图片被移动或删除时，组件自动退回纯色背景。
+
 ## 跟随 Todoist 打开
 
 双击 **启用联动.cmd**。它会在当前用户的 Windows 登录启动文件夹创建一个快捷方式，并立即开启后台检测。
@@ -67,6 +75,8 @@ powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File .\verify-animation.
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\verify-follow.ps1
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\verify-theme.ps1
 powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File .\verify-theme-ui.ps1
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\verify-background.ps1
+powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File .\verify-wallpaper-ui.ps1
 ```
 
 测试使用模拟网络响应和进程状态，不读取真实 API Token，也不会调用 Todoist API。动画测试会短暂显示一个测试窗口。

@@ -5,8 +5,11 @@
 token*
 credentials*
 theme.json
+background.json
 *.tmp
 .theme-ui-test-*/
+.background-test-*/
+.wallpaper-ui-test-*/
 
 # Development backups and generated output
 *.before-*.ps1

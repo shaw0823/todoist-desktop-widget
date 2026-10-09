@@ -9,8 +9,12 @@ $dataDir = Join-Path $env:LOCALAPPDATA 'TodoistDesktopWidget'
 New-Item -ItemType Directory -Path $dataDir -Force | Out-Null
 $tokenPath = Join-Path $dataDir 'token.dat'
 . (Join-Path $PSScriptRoot 'Theme.ps1')
+. (Join-Path $PSScriptRoot 'Background.ps1')
 $themePath = Join-Path $dataDir 'theme.json'
 $script:theme = Read-Theme $themePath
+$backgroundPath = Join-Path $dataDir 'background.json'
+$script:backgroundSettings = Read-BackgroundSettings $backgroundPath
+$script:wallpaperCache = $null
 $script:token = ''
 $script:date = [DateTime]::Today
 $script:busy = $false
@@ -52,13 +56,18 @@ if (Test-Path $tokenPath) {
   </Style>
  </Window.Resources>
  <Grid>
- <Border x:Name="WidgetFrame" Background="{DynamicResource WidgetBackground}" BorderBrush="{DynamicResource WidgetBorder}" BorderThickness="1" CornerRadius="10" Padding="10">
-  <DockPanel>
+ <Border x:Name="WidgetFrame" Background="Transparent" BorderBrush="{DynamicResource WidgetBorder}" BorderThickness="1" CornerRadius="10">
+  <Grid>
+   <Grid x:Name="BackgroundLayer" IsHitTestVisible="False">
+    <Border x:Name="BackgroundFill" Background="{DynamicResource WidgetBackground}" CornerRadius="9"/>
+    <Border x:Name="WallpaperOverlay" Background="{DynamicResource WidgetBackground}" CornerRadius="9" Visibility="Collapsed"/>
+   </Grid>
+  <DockPanel Margin="10">
    <StackPanel DockPanel.Dock="Top">
     <Grid x:Name="Header" Background="Transparent" Margin="0,0,0,8">
      <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
      <TextBlock Text="☀ Todoist" FontWeight="Bold" VerticalAlignment="Center"/>
-     <StackPanel Grid.Column="1" Orientation="Horizontal"><Button x:Name="Appearance" Content="◐" ToolTip="自定义颜色"/><Button x:Name="Settings" Content="⚙" ToolTip="连接 Todoist"/><Button x:Name="Pin" Content="📌" ToolTip="切换置顶" Background="{DynamicResource WidgetAccent}" Foreground="{DynamicResource WidgetBackground}"/><Button x:Name="Refresh" Content="↻" ToolTip="刷新"/><Button x:Name="Close" Content="×" ToolTip="关闭"/></StackPanel>
+     <StackPanel Grid.Column="1" Orientation="Horizontal"><Button x:Name="Appearance" Content="◐" ToolTip="颜色、壁纸和透明度"/><Button x:Name="Settings" Content="⚙" ToolTip="连接 Todoist"/><Button x:Name="Pin" Content="📌" ToolTip="切换置顶" Background="{DynamicResource WidgetAccent}" Foreground="{DynamicResource WidgetBackground}"/><Button x:Name="Refresh" Content="↻" ToolTip="刷新"/><Button x:Name="Close" Content="×" ToolTip="关闭"/></StackPanel>
     </Grid>
     <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,0,0,8"><Button x:Name="Previous" Content="‹"/><Button x:Name="Day" Content="今天"/><Button x:Name="Next" Content="›"/></StackPanel>
     <TextBox x:Name="Input" Background="{DynamicResource WidgetSurface}" Foreground="{DynamicResource WidgetForeground}" CaretBrush="{DynamicResource WidgetForeground}" BorderBrush="{DynamicResource WidgetBorder}" Padding="9" Margin="0,0,0,8" ToolTip="输入任务内容，回车添加到当前日期"/>
@@ -66,6 +75,7 @@ if (Test-Path $tokenPath) {
    <TextBlock x:Name="Status" DockPanel.Dock="Bottom" Foreground="{DynamicResource WidgetMuted}" TextWrapping="Wrap" Margin="0,8,0,0" FontSize="11"/>
    <ScrollViewer VerticalScrollBarVisibility="Auto"><StackPanel x:Name="Tasks"/></ScrollViewer>
   </DockPanel>
+  </Grid>
  </Border>
  <Thumb x:Name="ResizeHandle" Width="15" Height="15" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,3,3" Cursor="SizeNWSE" ToolTip="拖动调整大小">
   <Thumb.Template><ControlTemplate TargetType="Thumb"><Grid Background="Transparent"><Path Data="M 5,12 L 12,5 M 9,12 L 12,9" Stroke="{DynamicResource WidgetMuted}" StrokeThickness="1"/></Grid></ControlTemplate></Thumb.Template>
@@ -75,7 +85,54 @@ if (Test-Path $tokenPath) {
 '@
 $window = [Windows.Markup.XamlReader]::Load((New-Object Xml.XmlNodeReader $xaml))
 $ui = @{}
-'Header','Appearance','Settings','Pin','Refresh','Close','Previous','Day','Next','Input','Status','Tasks','ResizeHandle','WidgetFrame' | ForEach-Object { $ui[$_] = $window.FindName($_) }
+'Header','Appearance','Settings','Pin','Refresh','Close','Previous','Day','Next','Input','Status','Tasks','ResizeHandle','WidgetFrame','BackgroundLayer','BackgroundFill','WallpaperOverlay' | ForEach-Object { $ui[$_] = $window.FindName($_) }
+function Get-WallpaperBitmap([string]$path) {
+    $file = Get-Item -LiteralPath $path -ErrorAction Stop
+    if ($file.PSIsContainer -or $file.Length -gt 50MB) { throw '请选择小于 50 MB 的图片文件。' }
+    $cacheKey = $file.FullName + '|' + $file.LastWriteTimeUtc.Ticks + '|' + $file.Length
+    if ($script:wallpaperCache -and $script:wallpaperCache.Key -eq $cacheKey) { return $script:wallpaperCache.Source }
+    $stream = [IO.File]::Open($file.FullName, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::ReadWrite)
+    try {
+        $bitmap = [Windows.Media.Imaging.BitmapImage]::new()
+        $bitmap.BeginInit()
+        $bitmap.CacheOption = [Windows.Media.Imaging.BitmapCacheOption]::OnLoad
+        $bitmap.DecodePixelWidth = 1600
+        $bitmap.StreamSource = $stream
+        $bitmap.EndInit()
+        $bitmap.Freeze()
+    } finally { $stream.Dispose() }
+    $script:wallpaperCache = @{Key=$cacheKey; Source=$bitmap}
+    return $bitmap
+}
+function Apply-Background($value, [switch]$Strict) {
+    $normalized = Get-NormalizedBackground $value
+    $bitmap = $null
+    if ($normalized.Mode -eq 'Image') {
+        try { $bitmap = Get-WallpaperBitmap $normalized.ImagePath }
+        catch { if ($Strict) { throw } }
+    }
+    if ($bitmap) {
+        $imageBrush = [Windows.Media.ImageBrush]::new($bitmap)
+        $imageBrush.Stretch = [Windows.Media.Stretch]::UniformToFill
+        $imageBrush.Freeze()
+        $ui.BackgroundFill.Background = $imageBrush
+        $ui.WallpaperOverlay.Visibility = 'Visible'
+        $ui.WallpaperOverlay.Opacity = $normalized.Overlay
+    } else {
+        $ui.BackgroundFill.SetResourceReference([Windows.Controls.Border]::BackgroundProperty, 'WidgetBackground')
+        $ui.WallpaperOverlay.Visibility = 'Collapsed'
+    }
+    $ui.BackgroundLayer.Opacity = $normalized.Opacity
+    $frameBrush = $window.Resources['WidgetBorder'].Clone()
+    $frameBrush.Opacity = $normalized.Opacity
+    $frameBrush.Freeze()
+    $ui.WidgetFrame.BorderBrush = $frameBrush
+    $surfaceBrush = $window.Resources['WidgetSurface'].Clone()
+    $surfaceBrush.Opacity = $(if ($bitmap -or $normalized.Opacity -lt 1) { 0.25 + 0.65 * $normalized.Opacity } else { 1 })
+    $surfaceBrush.Freeze()
+    $window.Resources['WidgetSurface'] = $surfaceBrush
+    $script:backgroundSettings = $normalized
+}
 function Apply-Theme($value) {
     $normalized = Get-NormalizedTheme $value
     $palette = Get-ThemePalette $normalized
@@ -85,6 +142,7 @@ function Apply-Theme($value) {
         $window.Resources['Widget' + $key] = $brush
     }
     $script:theme = $normalized
+    Apply-Background $script:backgroundSettings
 }
 Apply-Theme $script:theme
 $ui.ResizeHandle.Add_DragDelta({
@@ -159,11 +217,13 @@ function Render-Tasks {
 }
 function Configure-Theme {
     $originalTheme = Get-NormalizedTheme $script:theme
+    $originalBackground = Get-NormalizedBackground $script:backgroundSettings
+    $backgroundDraft = Get-NormalizedBackground $script:backgroundSettings
     [xml]$appearanceXaml = @'
-<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" Title="自定义颜色" Width="440" MinHeight="360" SizeToContent="Height" ResizeMode="NoResize" WindowStartupLocation="CenterOwner" Background="#F5F6F7">
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" Title="外观设置" Width="440" MinHeight="360" SizeToContent="Height" ResizeMode="NoResize" WindowStartupLocation="CenterOwner" Background="#F5F6F7">
  <StackPanel Margin="20">
-  <TextBlock Text="自定义组件颜色" FontSize="18" FontWeight="SemiBold" Margin="0,0,0,6"/>
-  <TextBlock Text="选择颜色或输入色号，组件会实时预览。" Foreground="#59636A" Margin="0,0,0,14"/>
+  <TextBlock Text="颜色、壁纸与透明度" FontSize="18" FontWeight="SemiBold" Margin="0,0,0,6"/>
+  <TextBlock Text="修改时实时预览，文字保持清晰。" Foreground="#59636A" Margin="0,0,0,14"/>
   <ComboBox x:Name="Preset" Margin="0,0,0,14" Padding="5" ToolTip="选择配色预设"/>
   <Grid>
    <Grid.ColumnDefinitions><ColumnDefinition Width="80"/><ColumnDefinition Width="*"/><ColumnDefinition Width="75"/></Grid.ColumnDefinitions>
@@ -178,6 +238,27 @@ function Configure-Theme {
    <TextBox x:Name="AccentColor" Grid.Row="2" Grid.Column="1" Margin="0,3,10,3" Padding="6" MaxLength="7"/>
    <Button x:Name="PickAccent" Grid.Row="2" Grid.Column="2" Content="选颜色" Margin="0,3,0,3"/>
   </Grid>
+  <Separator Margin="0,10,0,10"/>
+  <DockPanel Margin="0,0,0,8">
+   <TextBlock Text="背景类型" Width="80" VerticalAlignment="Center"/>
+   <ComboBox x:Name="BackgroundMode" Padding="5"/>
+  </DockPanel>
+  <DockPanel Margin="0,0,0,8">
+   <Button x:Name="ChooseWallpaper" Content="选择图片" Padding="8,4" DockPanel.Dock="Right" Margin="8,0,0,0"/>
+   <Button x:Name="ClearWallpaper" Content="移除" Padding="8,4" DockPanel.Dock="Right"/>
+   <TextBlock x:Name="WallpaperName" Text="未选择壁纸" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
+  </DockPanel>
+  <TextBlock Text="背景不透明度（0% 为透明，文字不受影响）" Foreground="#59636A"/>
+  <DockPanel Margin="0,4,0,8">
+   <TextBlock x:Name="OpacityValue" DockPanel.Dock="Right" Width="42" TextAlignment="Right"/>
+   <Slider x:Name="BackgroundOpacity" Minimum="0" Maximum="100" TickFrequency="5" IsSnapToTickEnabled="True"/>
+  </DockPanel>
+  <TextBlock Text="壁纸遮罩（使用背景颜色保护文字对比度）" Foreground="#59636A"/>
+  <DockPanel Margin="0,4,0,8">
+   <TextBlock x:Name="OverlayValue" DockPanel.Dock="Right" Width="42" TextAlignment="Right"/>
+   <Slider x:Name="WallpaperOverlayAmount" Minimum="0" Maximum="100" TickFrequency="5" IsSnapToTickEnabled="True"/>
+  </DockPanel>
+  <Button x:Name="MakeTransparent" Content="设为完全透明背景" HorizontalAlignment="Left" Padding="8,4"/>
   <TextBlock x:Name="ColorMessage" Text="支持 #RRGGBB，例如 #263F43。" Foreground="#59636A" Margin="0,8,0,10"/>
   <DockPanel>
    <Button x:Name="ResetColors" Content="恢复默认" Padding="10,5" DockPanel.Dock="Left"/>
@@ -191,6 +272,15 @@ function Configure-Theme {
 '@
     $appearanceDialog = [Windows.Markup.XamlReader]::Load((New-Object Xml.XmlNodeReader $appearanceXaml))
     $appearanceDialog.Owner = $window
+    $backgroundControls = @{}
+    foreach ($name in 'BackgroundMode','BackgroundOpacity','WallpaperOverlayAmount','WallpaperName','OpacityValue','OverlayValue') {
+        $backgroundControls[$name] = $appearanceDialog.FindName($name)
+    }
+    $backgroundControls.BackgroundMode.Items.Add('纯色') | Out-Null
+    $backgroundControls.BackgroundMode.Items.Add('壁纸') | Out-Null
+    $backgroundControls.BackgroundMode.SelectedIndex = $(if ($backgroundDraft.Mode -eq 'Image') { 1 } else { 0 })
+    $backgroundControls.BackgroundOpacity.Value = $backgroundDraft.Opacity * 100
+    $backgroundControls.WallpaperOverlayAmount.Value = $backgroundDraft.Overlay * 100
     $editBoxes = @{}
     foreach ($key in 'Background','Foreground','Accent') {
         $editBoxes[$key] = $appearanceDialog.FindName($key + 'Color')
@@ -218,14 +308,48 @@ function Configure-Theme {
         try {
             $candidate = @{Background=$editBoxes.Background.Text; Foreground=$editBoxes.Foreground.Text; Accent=$editBoxes.Accent.Text}
             Apply-Theme $candidate
+            $backgroundDraft.Mode = $(if ($backgroundControls.BackgroundMode.SelectedIndex -eq 1) { 'Image' } else { 'Color' })
+            $backgroundDraft.Opacity = [double]$backgroundControls.BackgroundOpacity.Value / 100
+            $backgroundDraft.Overlay = [double]$backgroundControls.WallpaperOverlayAmount.Value / 100
+            $backgroundControls.OpacityValue.Text = [string][Math]::Round($backgroundControls.BackgroundOpacity.Value) + '%'
+            $backgroundControls.OverlayValue.Text = [string][Math]::Round($backgroundControls.WallpaperOverlayAmount.Value) + '%'
+            $backgroundControls.WallpaperOverlayAmount.IsEnabled = $backgroundDraft.Mode -eq 'Image'
+            $backgroundControls.WallpaperName.Text = $(if ($backgroundDraft.ImagePath) { [IO.Path]::GetFileName($backgroundDraft.ImagePath) } else { '未选择壁纸' })
+            $backgroundControls.WallpaperName.ToolTip = $backgroundDraft.ImagePath
+            Apply-Background $backgroundDraft -Strict
             $saveColors.IsEnabled = $true
             $colorMessage.Text = '正在预览 · 保存后下次打开继续使用。'
         } catch {
             $saveColors.IsEnabled = $false
-            $colorMessage.Text = '请输入有效色号，例如 #263F43 或 #FFF。'
+            $colorMessage.Text = '请检查色号，或选择可读取的 JPG / PNG / BMP 图片。'
         }
     }
     foreach ($box in $editBoxes.Values) { $box.Add_TextChanged({ & $previewTheme }) }
+    $backgroundControls.BackgroundMode.Add_SelectionChanged({ & $previewTheme })
+    $backgroundControls.BackgroundOpacity.Add_ValueChanged({ & $previewTheme })
+    $backgroundControls.WallpaperOverlayAmount.Add_ValueChanged({ & $previewTheme })
+    $appearanceDialog.FindName('ChooseWallpaper').Add_Click({
+        $fileDialog = [Microsoft.Win32.OpenFileDialog]::new()
+        $fileDialog.Title = '选择组件壁纸'
+        $fileDialog.Filter = '图片文件|*.jpg;*.jpeg;*.png;*.bmp|所有文件|*.*'
+        $fileDialog.CheckFileExists = $true
+        if ($fileDialog.ShowDialog($appearanceDialog)) {
+            $backgroundDraft.ImagePath = $fileDialog.FileName
+            $backgroundControls.BackgroundMode.SelectedIndex = 1
+            if ($backgroundControls.BackgroundOpacity.Value -eq 0) { $backgroundControls.BackgroundOpacity.Value = 100 }
+            & $previewTheme
+        }
+    })
+    $appearanceDialog.FindName('ClearWallpaper').Add_Click({
+        $backgroundDraft.ImagePath = ''
+        $backgroundControls.BackgroundMode.SelectedIndex = 0
+        & $previewTheme
+    })
+    $appearanceDialog.FindName('MakeTransparent').Add_Click({
+        $backgroundControls.BackgroundMode.SelectedIndex = 0
+        $backgroundControls.BackgroundOpacity.Value = 0
+        & $previewTheme
+    })
     $presets = [ordered]@{
         '深青色' = (Get-DefaultTheme)
         '石墨黑' = @{Background='#202329'; Foreground='#E8EDF3'; Accent='#8EB8FF'}
@@ -243,17 +367,39 @@ function Configure-Theme {
     $appearanceDialog.FindName('ResetColors').Add_Click({
         $defaults = Get-DefaultTheme
         foreach ($key in 'Background','Foreground','Accent') { $editBoxes[$key].Text = $defaults[$key] }
+        $backgroundDefaults = Get-DefaultBackground
+        $backgroundDraft.ImagePath = ''
+        $backgroundControls.BackgroundMode.SelectedIndex = 0
+        $backgroundControls.BackgroundOpacity.Value = $backgroundDefaults.Opacity * 100
+        $backgroundControls.WallpaperOverlayAmount.Value = $backgroundDefaults.Overlay * 100
+        & $previewTheme
     })
     $saveColors.Add_Click({
         try {
             $candidate = Get-NormalizedTheme @{Background=$editBoxes.Background.Text; Foreground=$editBoxes.Foreground.Text; Accent=$editBoxes.Accent.Text}
+            $backgroundCandidate = Get-NormalizedBackground $backgroundDraft
+            Apply-Background $backgroundCandidate -Strict
+            $previousTheme = Read-Theme $themePath
+            $themeExisted = [IO.File]::Exists($themePath)
             Save-Theme $candidate $themePath
+            try { Save-BackgroundSettings $backgroundCandidate $backgroundPath }
+            catch {
+                if ($themeExisted) { Save-Theme $previousTheme $themePath }
+                else { [IO.File]::Delete($themePath) }
+                throw
+            }
             Apply-Theme $candidate
             $appearanceDialog.DialogResult = $true
-        } catch { $colorMessage.Text = '保存失败，请检查色号和本机文件权限。' }
+        } catch { $colorMessage.Text = '保存失败，请检查色号、图片和本机文件权限。' }
     })
+    & $previewTheme
     try { $saved = $appearanceDialog.ShowDialog() }
-    finally { if ($appearanceDialog.DialogResult -ne $true) { Apply-Theme $originalTheme } }
+    finally {
+        if ($appearanceDialog.DialogResult -ne $true) {
+            Apply-Background $originalBackground
+            Apply-Theme $originalTheme
+        }
+    }
 }
 function Configure {
     $dialog = New-Object Windows.Window

@@ -1,7 +1,7 @@
 ﻿$ErrorActionPreference = 'Stop'
 $testDirectory = Join-Path $PSScriptRoot ('.theme-ui-test-' + [Guid]::NewGuid().ToString('N'))
 $source = [IO.File]::ReadAllText((Join-Path $PSScriptRoot 'Start.ps1'))
-foreach ($module in 'Runtime.ps1','Theme.ps1') {
+foreach ($module in 'Runtime.ps1','Theme.ps1','Background.ps1') {
     $modulePath = (Join-Path $PSScriptRoot $module).Replace("'", "''")
     $source = $source.Replace(". (Join-Path `$PSScriptRoot '$module')", ". '$modulePath'")
 }
@@ -20,7 +20,7 @@ function Test-ThemeDialog([string]$mode) {
     $testTimer.Add_Tick({
         $state = $this.Tag
         $state.Attempts++
-        $dialog = @($window.OwnedWindows | Where-Object { $_.Title -eq '自定义颜色' }) | Select-Object -First 1
+        $dialog = @($window.OwnedWindows | Where-Object { $_.Title -eq '外观设置' }) | Select-Object -First 1
         if (!$dialog) {
             if ($state.Attempts -gt 30) { $this.Stop(); throw 'Theme dialog did not open' }
             return
@@ -58,7 +58,7 @@ try {
     Test-ThemeDialog 'Save'
     $persisted = Read-Theme $themePath
     if ($persisted.Background -ne '#F4F6F8' -or $script:theme.Background -ne '#F4F6F8') { throw 'Save did not persist the theme' }
-    if ($ui.WidgetFrame.Background.Color.ToString() -ne '#FFF4F6F8') { throw 'Widget background did not update' }
+    if ($ui.BackgroundFill.Background.Color.ToString() -ne '#FFF4F6F8') { throw 'Widget background did not update' }
     'PASS: live preview, input validation, cancel rollback, presets, UI save and reload'
 } finally {
     $window.Close()
