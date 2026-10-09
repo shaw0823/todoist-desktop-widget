@@ -1,24 +1,37 @@
-﻿$ErrorActionPreference = 'Stop'
+﻿param([switch]$SkipInitialOpen)
+$ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'Runtime.ps1')
 $watcherMutex = Enter-WidgetMutex $watcherMutexName
 if ($null -eq $watcherMutex) { return }
 $stopSignal = [Threading.EventWaitHandle]::new($false, [Threading.EventResetMode]::ManualReset, $watcherStopName)
 $stopSignal.Reset() | Out-Null
-$wasRunning = $false
-$wasVisible = $false
+$sessionOpen = $false
+$openSamples = 0
+$absentSamples = 0
+$firstSample = $true
 try {
     do {
-        $processes = @(Get-Process -Name 'Todoist' -ErrorAction SilentlyContinue)
-        $running = $processes.Count -gt 0
-        $visible = @($processes | Where-Object { $_.MainWindowHandle -ne [IntPtr]::Zero }).Count -gt 0
-        # Once per launch/open, so closing the widget does not repeatedly reopen it.
-        if (($running -and !$wasRunning) -or ($visible -and !$wasVisible)) {
-            Start-Widget
+        $state = Get-TodoistState
+        if ($firstSample) {
+            if ($SkipInitialOpen -and $state.Present) { $sessionOpen = $true }
+            $firstSample = $false
         }
-        $wasRunning = $running
-        $wasVisible = $visible
-        foreach ($process in $processes) { $process.Dispose() }
-    } while (!$stopSignal.WaitOne(1000))
+        if ($state.Present) {
+            $absentSamples = 0
+            if ($state.Open -and !$sessionOpen) {
+                $openSamples++
+                if ($openSamples -ge 3) {
+                    try { Start-Widget; $sessionOpen = $true }
+                    catch { $openSamples = 0 }
+                }
+            } else { $openSamples = 0 }
+        } else {
+            $openSamples = 0
+            $absentSamples++
+            # Ignore short handle gaps during Electron closing/window recreation.
+            if ($absentSamples -ge 4) { $sessionOpen = $false }
+        }
+    } while (!$stopSignal.WaitOne(500))
 } finally {
     $stopSignal.Dispose()
     $watcherMutex.ReleaseMutex()
