@@ -39,13 +39,36 @@ if (Test-Path $tokenPath) {
   <SolidColorBrush x:Key="WidgetAccent" Color="#70D7C3"/>
   <SolidColorBrush x:Key="WidgetSurface" Color="#365055"/>
   <SolidColorBrush x:Key="WidgetBorder" Color="#557176"/>
+  <SolidColorBrush x:Key="WidgetControlBorder" Color="#557176"/>
   <SolidColorBrush x:Key="WidgetDivider" Color="#3B575B"/>
   <SolidColorBrush x:Key="WidgetMuted" Color="#9BB7BB"/>
-  <Style TargetType="Button"><Setter Property="Background" Value="{DynamicResource WidgetSurface}"/><Setter Property="Foreground" Value="{DynamicResource WidgetForeground}"/><Setter Property="BorderBrush" Value="{DynamicResource WidgetBorder}"/><Setter Property="Padding" Value="6,3"/><Setter Property="Margin" Value="2"/><Setter Property="Cursor" Value="Hand"/></Style>
+  <Style TargetType="Button">
+   <Setter Property="Background" Value="{DynamicResource WidgetSurface}"/>
+   <Setter Property="Foreground" Value="{DynamicResource WidgetForeground}"/>
+   <Setter Property="BorderBrush" Value="{DynamicResource WidgetControlBorder}"/>
+   <Setter Property="BorderThickness" Value="1.2"/>
+   <Setter Property="Padding" Value="6,3"/>
+   <Setter Property="Margin" Value="2"/>
+   <Setter Property="MinHeight" Value="24"/>
+   <Setter Property="Cursor" Value="Hand"/>
+   <Setter Property="HorizontalContentAlignment" Value="Center"/>
+   <Setter Property="VerticalContentAlignment" Value="Center"/>
+   <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Button">
+    <Border x:Name="ButtonChrome" CornerRadius="4" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}">
+     <ContentPresenter Margin="{TemplateBinding Padding}" HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}" VerticalAlignment="{TemplateBinding VerticalContentAlignment}" RecognizesAccessKey="True"/>
+    </Border>
+    <ControlTemplate.Triggers>
+     <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="ButtonChrome" Property="BorderBrush" Value="{DynamicResource WidgetAccent}"/></Trigger>
+     <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="ButtonChrome" Property="BorderBrush" Value="{DynamicResource WidgetAccent}"/></Trigger>
+     <Trigger Property="IsPressed" Value="True"><Setter TargetName="ButtonChrome" Property="Opacity" Value="0.8"/></Trigger>
+     <Trigger Property="IsEnabled" Value="False"><Setter TargetName="ButtonChrome" Property="Opacity" Value="0.5"/></Trigger>
+    </ControlTemplate.Triggers>
+   </ControlTemplate></Setter.Value></Setter>
+  </Style>
   <Style TargetType="CheckBox">
    <Setter Property="Cursor" Value="Hand"/>
    <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="CheckBox">
-    <Border x:Name="Box" Width="16" Height="16" CornerRadius="3" BorderThickness="1" BorderBrush="{DynamicResource WidgetBorder}" Background="{DynamicResource WidgetSurface}">
+    <Border x:Name="Box" Width="18" Height="18" CornerRadius="3" BorderThickness="1.5" BorderBrush="{DynamicResource WidgetControlBorder}" Background="{DynamicResource WidgetSurface}">
      <Path x:Name="Mark" Data="M 3,8 L 6,11 L 12,4" Stroke="{DynamicResource WidgetBackground}" StrokeThickness="2" StrokeStartLineCap="Round" StrokeEndLineCap="Round" Visibility="Collapsed"/>
     </Border>
     <ControlTemplate.Triggers>
@@ -70,7 +93,7 @@ if (Test-Path $tokenPath) {
      <StackPanel Grid.Column="1" Orientation="Horizontal"><Button x:Name="Appearance" Content="◐" ToolTip="颜色、壁纸和透明度"/><Button x:Name="Settings" Content="⚙" ToolTip="连接 Todoist"/><Button x:Name="Pin" Content="📌" ToolTip="切换置顶" Background="{DynamicResource WidgetAccent}" Foreground="{DynamicResource WidgetBackground}"/><Button x:Name="Refresh" Content="↻" ToolTip="刷新"/><Button x:Name="Close" Content="×" ToolTip="关闭"/></StackPanel>
     </Grid>
     <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,0,0,8"><Button x:Name="Previous" Content="‹"/><Button x:Name="Day" Content="今天"/><Button x:Name="Next" Content="›"/></StackPanel>
-    <TextBox x:Name="Input" Background="{DynamicResource WidgetSurface}" Foreground="{DynamicResource WidgetForeground}" CaretBrush="{DynamicResource WidgetForeground}" BorderBrush="{DynamicResource WidgetBorder}" Padding="9" Margin="0,0,0,8" ToolTip="输入任务内容，回车添加到当前日期"/>
+    <TextBox x:Name="Input" Background="{DynamicResource WidgetSurface}" Foreground="{DynamicResource WidgetForeground}" CaretBrush="{DynamicResource WidgetForeground}" BorderBrush="{DynamicResource WidgetControlBorder}" BorderThickness="1.5" Padding="9" Margin="0,0,0,8" ToolTip="输入任务内容，回车添加到当前日期"/>
    </StackPanel>
    <TextBlock x:Name="Status" DockPanel.Dock="Bottom" Foreground="{DynamicResource WidgetMuted}" TextWrapping="Wrap" Margin="0,8,0,0" FontSize="11"/>
    <ScrollViewer VerticalScrollBarVisibility="Auto"><StackPanel x:Name="Tasks"/></ScrollViewer>
@@ -127,8 +150,14 @@ function Apply-Background($value, [switch]$Strict) {
     $frameBrush.Opacity = $normalized.Opacity
     $frameBrush.Freeze()
     $ui.WidgetFrame.BorderBrush = $frameBrush
+    $floatingControls = $normalized.Mode -eq 'Image' -or $normalized.Opacity -lt 1
+    $controlBorderColor = Blend-ThemeColor $script:theme.Background $script:theme.Foreground $(if ($floatingControls) { 0.65 } else { 0.24 })
+    $controlBorder = [Windows.Media.BrushConverter]::new().ConvertFromString($controlBorderColor)
+    $controlBorder.Freeze()
+    $window.Resources['WidgetControlBorder'] = $controlBorder
     $surfaceBrush = $window.Resources['WidgetSurface'].Clone()
-    $surfaceBrush.Opacity = $(if ($bitmap -or $normalized.Opacity -lt 1) { 0.25 + 0.65 * $normalized.Opacity } else { 1 })
+    # Actionable controls stay readable even when the background itself is invisible.
+    $surfaceBrush.Opacity = $(if ($floatingControls) { 0.94 } else { 1 })
     $surfaceBrush.Freeze()
     $window.Resources['WidgetSurface'] = $surfaceBrush
     $script:backgroundSettings = $normalized
