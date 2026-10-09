@@ -64,7 +64,7 @@ todoist widge 是一个基于 Todoist 官方 API 的第三方独立 Windows 任�
 
 ## 可选：跟随 Todoist 打开
 
-双击 **启用联动.cmd**。它会在当前用户的 Windows 登录启动文件夹创建一个快捷方式，并立即开启后台检测。
+点击应用中的 **⚙ 设置**，在“启动联动”中打开 **打开 Todoist 时自动启动 todoist widge**。切换会立即保存并生效，登录 Windows 后继续沿用；设置页会显示当前是否开启。
 
 之后继续使用原来的 Todoist 图标，本应用会在 Todoist 主窗口稳定显示约一秒后跟随打开。已经打开的应用不会重复打开；手动关闭应用后，同一次 Todoist 使用期间不会反复弹出。从托盘关闭并重新打开 Todoist 窗口也会触发联动。
 
@@ -72,9 +72,11 @@ todoist widge 是一个基于 Todoist 官方 API 的第三方独立 Windows 任�
 
 联动负责跟随打开应用。关闭 Todoist 后，本应用仍会留在桌面，通过 API 独立显示和同步任务，也能勾选完成；需要退出本应用时，点击右上角 **×**。
 
-启用后请保留解压文件夹及路径，否则登录启动快捷方式会失效。移动文件夹后，在新位置重新运行“启用联动.cmd”。
+启用后请保留应用文件夹及路径。移动文件夹后，在新位置启动应用，通过设置页重新开启联动。
 
-双击“取消联动.cmd”可停止后台检测并移除启动快捷方式。取消联动不影响单独启动应用，也不删除连接密钥。
+在同一设置页关闭此开关，即可取消联动。应用会停止后台检测并移除联动启动项，当前窗口保持打开；仍可通过桌面快捷方式独立启动，连接密钥与外观设置继续保留。
+
+`启用联动.cmd` 和 `取消联动.cmd` 保留为手动维护入口，日常使用直接在应用设置中操作。
 
 网络请求在后台执行，不阻塞界面；无网络时保留已有列表并显示错误。
 
@@ -96,6 +98,8 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\verify-background.ps1
 powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File .\verify-wallpaper-ui.ps1
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\verify-calendar.ps1
 powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File .\verify-calendar-ui.ps1
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\verify-follow-settings.ps1
+powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File .\verify-follow-settings-ui.ps1
 ```
 
 测试使用模拟网络响应和进程状态，不读取真实 API Token，也不会调用 Todoist API。动画测试会短暂显示一个测试窗口。

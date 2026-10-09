@@ -11,6 +11,8 @@ background.json
 .background-test-*/
 .wallpaper-ui-test-*/
 .calendar-ui-test-*/
+.follow-settings-test-*/
+.follow-settings-ui-test-*/
 
 # Development backups and generated output
 *.before-*.ps1

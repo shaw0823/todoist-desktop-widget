@@ -11,6 +11,7 @@ $tokenPath = Join-Path $dataDir 'token.dat'
 . (Join-Path $PSScriptRoot 'Theme.ps1')
 . (Join-Path $PSScriptRoot 'Background.ps1')
 . (Join-Path $PSScriptRoot 'Calendar.ps1')
+. (Join-Path $PSScriptRoot 'FollowSettings.ps1')
 $themePath = Join-Path $dataDir 'theme.json'
 $script:theme = Read-Theme $themePath
 $backgroundPath = Join-Path $dataDir 'background.json'
@@ -94,7 +95,7 @@ if (Test-Path $tokenPath) {
     <Grid x:Name="Header" Background="#01000000" MinHeight="30" Cursor="SizeAll" ToolTip="拖动标题或顶部空白处移动组件" Margin="0,0,0,8">
      <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
      <TextBlock Text="☀ Todoist" FontWeight="Bold" VerticalAlignment="Center"/>
-     <StackPanel Grid.Column="1" Orientation="Horizontal"><Button x:Name="Appearance" Content="◐" ToolTip="颜色、壁纸和透明度"/><Button x:Name="Settings" Content="⚙" ToolTip="连接 Todoist"/><Button x:Name="Pin" Content="📌" ToolTip="切换置顶" Background="{DynamicResource WidgetAccent}" Foreground="{DynamicResource WidgetBackground}"/><Button x:Name="Refresh" Content="↻" ToolTip="刷新"/><Button x:Name="Close" Content="×" ToolTip="关闭"/></StackPanel>
+     <StackPanel Grid.Column="1" Orientation="Horizontal"><Button x:Name="Appearance" Content="◐" ToolTip="颜色、壁纸和透明度"/><Button x:Name="Settings" Content="⚙" ToolTip="连接和启动设置"/><Button x:Name="Pin" Content="📌" ToolTip="切换置顶" Background="{DynamicResource WidgetAccent}" Foreground="{DynamicResource WidgetBackground}"/><Button x:Name="Refresh" Content="↻" ToolTip="刷新"/><Button x:Name="Close" Content="×" ToolTip="关闭"/></StackPanel>
     </Grid>
     <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,0,0,8"><Button x:Name="Previous" Content="‹"/><Button x:Name="Day" Content="今天"/><Button x:Name="Next" Content="›"/><Button x:Name="ViewToggle" Content="月历" ToolTip="切换到完整月历" Margin="10,2,2,2"/></StackPanel>
     <TextBox x:Name="Input" Background="{DynamicResource WidgetSurface}" Foreground="{DynamicResource WidgetForeground}" CaretBrush="{DynamicResource WidgetForeground}" BorderBrush="{DynamicResource WidgetControlBorder}" BorderThickness="1.5" Padding="9" Margin="0,0,0,8" ToolTip="输入任务内容，回车添加到当前日期"/>
@@ -619,15 +620,76 @@ function Configure-Theme {
         }
     }
 }
+function Start-FollowUpdate([bool]$Enabled, $Context) {
+    $worker = [PowerShell]::Create()
+    try {
+        $code = 'param($runtimePath,$settingsPath,$enabled) $ErrorActionPreference="Stop"; . $runtimePath; . $settingsPath; $null=Set-FollowEnabled -Enabled $enabled -SkipInitialOpen; Get-FollowEnabled'
+        $worker.AddScript($code).AddArgument((Join-Path $PSScriptRoot 'Runtime.ps1')).AddArgument((Join-Path $PSScriptRoot 'FollowSettings.ps1')).AddArgument($Enabled) | Out-Null
+        $handle = $worker.BeginInvoke()
+        $script:jobs.Add(@{Worker=$worker; Handle=$handle; Kind='Follow'; Context=$Context})
+    } catch { $worker.Dispose(); throw }
+}
 function Configure {
-    $dialog = New-Object Windows.Window
-    $dialog.Title='连接 Todoist'; $dialog.Width=420; $dialog.Height=205; $dialog.ResizeMode='NoResize'; $dialog.Owner=$window; $dialog.WindowStartupLocation='CenterOwner'
-    $panel=New-Object Windows.Controls.StackPanel; $panel.Margin='16'
-    $label=New-Object Windows.Controls.TextBlock; $label.Text="Todoist → 设置 → 关联应用 → 开发者`n复制 API Token；密钥使用 Windows 当前用户加密保存。"; $label.Margin='0,0,0,12'
-    $password=New-Object Windows.Controls.PasswordBox; $password.Password=$script:token; $password.Padding='6'
-    $save=New-Object Windows.Controls.Button; $save.Content='保存并连接'; $save.Margin='0,12,0,0'; $save.Padding='6'
-    $save.Add_Click({ if ($password.Password.Trim()) { Save-Token $password.Password.Trim(); $dialog.DialogResult=$true } })
-    $panel.Children.Add($label)|Out-Null; $panel.Children.Add($password)|Out-Null; $panel.Children.Add($save)|Out-Null; $dialog.Content=$panel
+    [xml]$settingsXaml = @'
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" Title="设置" Width="440" SizeToContent="Height" ResizeMode="NoResize" WindowStartupLocation="CenterOwner" Background="#F5F6F7">
+ <StackPanel Margin="20">
+  <TextBlock Text="连接 Todoist" FontSize="18" FontWeight="SemiBold" Margin="0,0,0,8"/>
+  <TextBlock Text="设置 → 关联应用 → 开发者，复制 API Token。" TextWrapping="Wrap" Foreground="#59636A" Margin="0,0,0,10"/>
+  <PasswordBox x:Name="ApiToken" Padding="7"/>
+  <TextBlock Text="API Token 仅保存在这台电脑上。" Foreground="#59636A" FontSize="11" Margin="0,6,0,0"/>
+  <Button x:Name="SaveConnection" Content="保存并连接" Padding="8" Margin="0,10,0,0"/>
+  <TextBlock x:Name="ConnectionStatus" Foreground="#AF3333" TextWrapping="Wrap" Margin="0,6,0,0"/>
+  <Border Background="#E9EEF0" CornerRadius="6" Padding="12" Margin="0,14,0,0">
+   <StackPanel>
+    <TextBlock Text="启动联动" FontSize="14" FontWeight="SemiBold" Margin="0,0,0,10"/>
+    <CheckBox x:Name="FollowStartup" Content="打开 Todoist 时自动启动 todoist widge" FontSize="13"/>
+    <TextBlock x:Name="FollowStatus" Foreground="#59636A" TextWrapping="Wrap" FontSize="11" Margin="20,6,0,0"/>
+    <TextBlock Text="关闭 Todoist 后，本应用继续运行。也可以通过桌面快捷方式独立打开。" Foreground="#59636A" TextWrapping="Wrap" FontSize="11" Margin="0,12,0,0"/>
+   </StackPanel>
+  </Border>
+  <Button x:Name="CloseSettings" Content="关闭" IsCancel="True" HorizontalAlignment="Right" MinWidth="75" Padding="8,5" Margin="0,14,0,0"/>
+ </StackPanel>
+</Window>
+'@
+    $dialog = [Windows.Markup.XamlReader]::Load((New-Object Xml.XmlNodeReader $settingsXaml))
+    $dialog.Owner = $window
+    $password = $dialog.FindName('ApiToken')
+    $password.Password = $script:token
+    $save = $dialog.FindName('SaveConnection')
+    $save.IsEnabled = ![string]::IsNullOrWhiteSpace($password.Password)
+    $password.Add_PasswordChanged({ $save.IsEnabled = ![string]::IsNullOrWhiteSpace($this.Password) })
+    $save.Add_Click({
+        try { Save-Token $password.Password.Trim(); $dialog.DialogResult = $true }
+        catch { $dialog.FindName('ConnectionStatus').Text = '保存失败，请重试。' }
+    })
+    $follow = $dialog.FindName('FollowStartup')
+    $followStatus = $dialog.FindName('FollowStatus')
+    $follow.IsChecked = Get-FollowEnabled
+    $followStatus.Text = $(if ($follow.IsChecked) { '已开启，打开 Todoist 时自动启动。' } else { '已关闭，使用桌面快捷方式独立启动。' })
+    $follow.Tag = @{Check=$follow; Message=$followStatus; Previous=[bool]$follow.IsChecked}
+    $activeFollow = @($script:jobs | Where-Object { $_.Kind -eq 'Follow' }) | Select-Object -Last 1
+    if ($activeFollow) {
+        $follow.Tag = $activeFollow.Context
+        $follow.Tag.Check = $follow
+        $follow.Tag.Message = $followStatus
+        $follow.IsChecked = $follow.Tag.Desired
+        $follow.IsEnabled = $false
+        $followStatus.Text = '正在保存启动设置…'
+    }
+    $follow.Add_Click({
+        $state = $this.Tag
+        $state.Desired = [bool]$this.IsChecked
+        $state.Check.IsEnabled = $false
+        $state.Message.Foreground = [Windows.Media.Brushes]::DimGray
+        $state.Message.Text = '正在保存启动设置…'
+        try { Start-FollowUpdate ([bool]$this.IsChecked) $state }
+        catch {
+            $state.Check.IsChecked = $state.Previous
+            $state.Check.IsEnabled = $true
+            $state.Message.Text = '修改失败，请重试。'
+            $state.Message.Foreground = [Windows.Media.Brushes]::Firebrick
+        }
+    })
     if ($dialog.ShowDialog()) { Load-Tasks }
 }
 function Test-HeaderDragSource($source) {
@@ -718,8 +780,23 @@ $poll.Add_Tick({
                 $ui.Input.IsEnabled=$true
                 if (!$failure) { $ui.Input.Clear(); $script:revision++; Load-Tasks }
             }
+            'Follow' {
+                $state = $job.Context
+                $state.Check.IsEnabled = $true
+                if ($failure) {
+                    $state.Check.IsChecked = $state.Previous
+                    $state.Message.Foreground = [Windows.Media.Brushes]::Firebrick
+                    $state.Message.Text = '修改失败，请重试。' + $failure.Exception.Message
+                } else {
+                    $enabled = [bool]$output[-1]
+                    $state.Previous = $enabled
+                    $state.Check.IsChecked = $enabled
+                    $state.Message.Foreground = [Windows.Media.Brushes]::DimGray
+                    $state.Message.Text = $(if ($enabled) { '已开启，打开 Todoist 时自动启动。' } else { '已关闭，使用桌面快捷方式独立启动。' })
+                }
+            }
         }
-        if ($failure) { Show-Error $failure }
+        if ($failure -and $job.Kind -ne 'Follow') { Show-Error $failure }
     }
 })
 $poll.Start()
