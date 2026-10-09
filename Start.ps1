@@ -41,7 +41,7 @@ if (Test-Path $tokenPath) {
   <SolidColorBrush x:Key="WidgetBorder" Color="#557176"/>
   <SolidColorBrush x:Key="WidgetDivider" Color="#3B575B"/>
   <SolidColorBrush x:Key="WidgetMuted" Color="#9BB7BB"/>
-  <Style TargetType="Button"><Setter Property="Background" Value="{DynamicResource WidgetSurface}"/><Setter Property="Foreground" Value="{DynamicResource WidgetForeground}"/><Setter Property="BorderBrush" Value="{DynamicResource WidgetBorder}"/><Setter Property="Padding" Value="6,3"/><Setter Property="Margin" Value="2"/></Style>
+  <Style TargetType="Button"><Setter Property="Background" Value="{DynamicResource WidgetSurface}"/><Setter Property="Foreground" Value="{DynamicResource WidgetForeground}"/><Setter Property="BorderBrush" Value="{DynamicResource WidgetBorder}"/><Setter Property="Padding" Value="6,3"/><Setter Property="Margin" Value="2"/><Setter Property="Cursor" Value="Hand"/></Style>
   <Style TargetType="CheckBox">
    <Setter Property="Cursor" Value="Hand"/>
    <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="CheckBox">
@@ -64,7 +64,7 @@ if (Test-Path $tokenPath) {
    </Grid>
   <DockPanel Margin="10">
    <StackPanel DockPanel.Dock="Top">
-    <Grid x:Name="Header" Background="Transparent" Margin="0,0,0,8">
+    <Grid x:Name="Header" Background="#01000000" MinHeight="30" Cursor="SizeAll" ToolTip="拖动标题或顶部空白处移动组件" Margin="0,0,0,8">
      <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
      <TextBlock Text="☀ Todoist" FontWeight="Bold" VerticalAlignment="Center"/>
      <StackPanel Grid.Column="1" Orientation="Horizontal"><Button x:Name="Appearance" Content="◐" ToolTip="颜色、壁纸和透明度"/><Button x:Name="Settings" Content="⚙" ToolTip="连接 Todoist"/><Button x:Name="Pin" Content="📌" ToolTip="切换置顶" Background="{DynamicResource WidgetAccent}" Foreground="{DynamicResource WidgetBackground}"/><Button x:Name="Refresh" Content="↻" ToolTip="刷新"/><Button x:Name="Close" Content="×" ToolTip="关闭"/></StackPanel>
@@ -412,7 +412,27 @@ function Configure {
     $panel.Children.Add($label)|Out-Null; $panel.Children.Add($password)|Out-Null; $panel.Children.Add($save)|Out-Null; $dialog.Content=$panel
     if ($dialog.ShowDialog()) { Load-Tasks }
 }
-$ui.Header.Add_MouseLeftButtonDown({ if ($_.OriginalSource -is [Windows.Controls.TextBlock] -or $_.OriginalSource -eq $ui.Header) { $window.DragMove() } })
+function Test-HeaderDragSource($source) {
+    $node = $source
+    while ($null -ne $node) {
+        if ($node -is [Windows.Controls.Primitives.ButtonBase]) { return $false }
+        if ($node -eq $ui.Header) { return $true }
+        if ($node -is [Windows.Media.Visual] -or $node -is [Windows.Media.Media3D.Visual3D]) {
+            $node = [Windows.Media.VisualTreeHelper]::GetParent($node)
+        } elseif ($node -is [Windows.FrameworkContentElement]) {
+            $node = $node.Parent
+        } elseif ($node -is [Windows.ContentElement]) {
+            $node = [Windows.ContentOperations]::GetParent($node)
+        } else { $node = [Windows.LogicalTreeHelper]::GetParent($node) }
+    }
+    return $false
+}
+$ui.Header.Add_PreviewMouseLeftButtonDown({
+    if ($_.LeftButton -eq [Windows.Input.MouseButtonState]::Pressed -and (Test-HeaderDragSource $_.OriginalSource)) {
+        $_.Handled = $true
+        $window.DragMove()
+    }
+})
 $ui.Settings.Add_Click({ Configure })
 $ui.Appearance.Add_Click({ Configure-Theme })
 $ui.Pin.Add_Click({ $window.Topmost = !$window.Topmost; $ui.Pin.Opacity = $(if ($window.Topmost) {1} else {0.45}) })

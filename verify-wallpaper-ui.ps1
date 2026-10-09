@@ -28,6 +28,35 @@ function Assert-ContentOpaque {
     Assert-Equal $taskLabel.Opacity 1.0 'Task text opacity remains opaque'
     Assert-Equal $taskLabel.Text 'Synthetic wallpaper test task' 'Task content is retained'
     Assert-Equal $ui.BackgroundLayer.IsHitTestVisible $false 'Background does not intercept clicks'
+    if ($ui.BackgroundLayer.Opacity -eq 0) { Assert-TransparentDragRegion }
+}
+function Assert-TransparentDragRegion {
+    $window.UpdateLayout()
+    Assert-Equal $ui.Header.Background.Color.A 1 'Header retains nonzero alpha for native hit testing'
+    Assert-Equal $ui.Header.Opacity 1.0 'Header is independent of transparent background layer'
+    if (!(Test-HeaderDragSource $ui.Header) -or !(Test-HeaderDragSource $ui.Header.Children[0])) { throw 'Header or title is not draggable' }
+    if (!(Test-HeaderDragSource $ui.Header.Children[0].Inlines.FirstInline)) { throw 'Title inline is not draggable' }
+    foreach ($button in @($ui.Appearance,$ui.Settings,$ui.Pin,$ui.Refresh,$ui.Close)) {
+        $button.ApplyTemplate() | Out-Null
+        if (Test-HeaderDragSource $button) { throw 'Header button incorrectly starts dragging' }
+        if (Test-HeaderDragSource ([Windows.Media.VisualTreeHelper]::GetChild($button,0))) { throw 'Button template incorrectly starts dragging' }
+    }
+    if (Test-HeaderDragSource $ui.Input) { throw 'Task input incorrectly starts dragging' }
+
+    # Render only the generated fixture's header to prove its blank pixels have alpha.
+    $width = [int][Math]::Ceiling($ui.Header.ActualWidth)
+    $height = [int][Math]::Ceiling($ui.Header.ActualHeight)
+    $visual = [Windows.Media.DrawingVisual]::new()
+    $drawing = $visual.RenderOpen()
+    try { $drawing.DrawRectangle([Windows.Media.VisualBrush]::new($ui.Header),$null,[Windows.Rect]::new(0,0,$width,$height)) }
+    finally { $drawing.Close() }
+    $rendered = [Windows.Media.Imaging.RenderTargetBitmap]::new($width,$height,96,96,[Windows.Media.PixelFormats]::Pbgra32)
+    $rendered.Render($visual)
+    $x = [int][Math]::Floor($ui.Header.ColumnDefinitions[0].ActualWidth - 3)
+    $y = [int][Math]::Floor($height / 2)
+    $pixel = [byte[]]::new(4)
+    $rendered.CopyPixels([Windows.Int32Rect]::new($x,$y,1,1),$pixel,4,0)
+    if ($pixel[3] -eq 0) { throw 'Header blank area still lets native mouse input pass through' }
 }
 function Invoke-TestButton($Dialog, [string]$Name) {
     $button = $Dialog.FindName($Name)
@@ -210,7 +239,7 @@ try {
     Apply-Background $invalidBackground
     if ($ui.BackgroundFill.Background -isnot [Windows.Media.SolidColorBrush]) { throw 'Undecodable wallpaper did not fall back to color.' }
     Assert-Equal ([IO.File]::ReadAllBytes($fixturePath) -join ',') $sourceBefore 'Image fixture unchanged by all previews'
-    Write-Output 'PASS: isolated wallpaper bitmap fit/cache/file release, background-only opacity, modal cancel/save/clear/transparent persistence, and missing/corrupt image fallback.'
+    Write-Output 'PASS: wallpaper and transparency persistence, missing-image fallback, and transparent header pixels/drag targets/button exclusions.'
 }
 finally {
     if ($window) { $window.Close() }
