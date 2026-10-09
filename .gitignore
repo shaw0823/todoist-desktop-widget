@@ -1,0 +1,15 @@
+# Local credentials and settings
+*.dat
+.env
+.env.*
+token*
+credentials*
+
+# Development backups and generated output
+*.before-*.ps1
+*.bak
+*.log
+*.zip
+dist/
+.DS_Store
+Thumbs.db
