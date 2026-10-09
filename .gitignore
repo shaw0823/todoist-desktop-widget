@@ -4,6 +4,9 @@
 .env.*
 token*
 credentials*
+theme.json
+*.tmp
+.theme-ui-test-*/
 
 # Development backups and generated output
 *.before-*.ps1

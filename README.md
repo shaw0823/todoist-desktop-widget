@@ -30,6 +30,14 @@
 - 输入任务内容并回车，添加到所选日期。
 - Token 使用 Windows DPAPI 当前用户加密，保存在 `%LOCALAPPDATA%\TodoistDesktopWidget\token.dat`。
 
+## 自定义颜色
+
+点击组件顶部的 **◐** 打开颜色设置。可以选择深青色、石墨黑、浅色、暖色预设，也可以分别选择背景、文字和强调色；支持系统颜色选择器以及 `#RRGGBB` / `#RGB` 色号输入。
+
+修改时会实时预览，点击“保存”后保留颜色，取消或关闭设置会恢复原配色。“恢复默认”用于预览初始配色，保存后生效。按钮、输入框、分隔线和勾选效果会一起适配。
+
+颜色只保存在本机 `%LOCALAPPDATA%\TodoistDesktopWidget\theme.json`，不会随 GitHub 上传。
+
 ## 跟随 Todoist 打开
 
 双击 **启用联动.cmd**。它会在当前用户的 Windows 登录启动文件夹创建一个快捷方式，并立即开启后台检测。
@@ -55,6 +63,8 @@
 ```powershell
 powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File .\verify-animation.ps1
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\verify-follow.ps1
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\verify-theme.ps1
+powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File .\verify-theme-ui.ps1
 ```
 
 测试使用模拟网络响应和进程状态，不读取真实 API Token，也不会调用 Todoist API。动画测试会短暂显示一个测试窗口。
