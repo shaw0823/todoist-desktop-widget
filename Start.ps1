@@ -10,6 +10,7 @@ New-Item -ItemType Directory -Path $dataDir -Force | Out-Null
 $tokenPath = Join-Path $dataDir 'token.dat'
 . (Join-Path $PSScriptRoot 'Theme.ps1')
 . (Join-Path $PSScriptRoot 'Background.ps1')
+. (Join-Path $PSScriptRoot 'Calendar.ps1')
 $themePath = Join-Path $dataDir 'theme.json'
 $script:theme = Read-Theme $themePath
 $backgroundPath = Join-Path $dataDir 'background.json'
@@ -17,6 +18,8 @@ $script:backgroundSettings = Read-BackgroundSettings $backgroundPath
 $script:wallpaperCache = $null
 $script:token = ''
 $script:date = [DateTime]::Today
+$script:viewMode = 'List'
+$script:viewSizes = @{ List = @{Width=400.0; Height=460.0}; Calendar = @{Width=780.0; Height=720.0} }
 $script:busy = $false
 $script:jobs = [Collections.Generic.List[object]]::new()
 $script:pending = @{}
@@ -40,6 +43,7 @@ if (Test-Path $tokenPath) {
   <SolidColorBrush x:Key="WidgetSurface" Color="#365055"/>
   <SolidColorBrush x:Key="WidgetBorder" Color="#557176"/>
   <SolidColorBrush x:Key="WidgetControlBorder" Color="#557176"/>
+  <SolidColorBrush x:Key="WidgetCalendarSurface" Color="#365055" Opacity="0.4"/>
   <SolidColorBrush x:Key="WidgetDivider" Color="#3B575B"/>
   <SolidColorBrush x:Key="WidgetMuted" Color="#9BB7BB"/>
   <Style TargetType="Button">
@@ -92,11 +96,22 @@ if (Test-Path $tokenPath) {
      <TextBlock Text="☀ Todoist" FontWeight="Bold" VerticalAlignment="Center"/>
      <StackPanel Grid.Column="1" Orientation="Horizontal"><Button x:Name="Appearance" Content="◐" ToolTip="颜色、壁纸和透明度"/><Button x:Name="Settings" Content="⚙" ToolTip="连接 Todoist"/><Button x:Name="Pin" Content="📌" ToolTip="切换置顶" Background="{DynamicResource WidgetAccent}" Foreground="{DynamicResource WidgetBackground}"/><Button x:Name="Refresh" Content="↻" ToolTip="刷新"/><Button x:Name="Close" Content="×" ToolTip="关闭"/></StackPanel>
     </Grid>
-    <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,0,0,8"><Button x:Name="Previous" Content="‹"/><Button x:Name="Day" Content="今天"/><Button x:Name="Next" Content="›"/></StackPanel>
+    <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,0,0,8"><Button x:Name="Previous" Content="‹"/><Button x:Name="Day" Content="今天"/><Button x:Name="Next" Content="›"/><Button x:Name="ViewToggle" Content="月历" ToolTip="切换到完整月历" Margin="10,2,2,2"/></StackPanel>
     <TextBox x:Name="Input" Background="{DynamicResource WidgetSurface}" Foreground="{DynamicResource WidgetForeground}" CaretBrush="{DynamicResource WidgetForeground}" BorderBrush="{DynamicResource WidgetControlBorder}" BorderThickness="1.5" Padding="9" Margin="0,0,0,8" ToolTip="输入任务内容，回车添加到当前日期"/>
    </StackPanel>
    <TextBlock x:Name="Status" DockPanel.Dock="Bottom" Foreground="{DynamicResource WidgetMuted}" TextWrapping="Wrap" Margin="0,8,0,0" FontSize="11"/>
-   <ScrollViewer VerticalScrollBarVisibility="Auto"><StackPanel x:Name="Tasks"/></ScrollViewer>
+   <Grid>
+    <ScrollViewer x:Name="ListView" VerticalScrollBarVisibility="Auto"><StackPanel x:Name="Tasks"/></ScrollViewer>
+    <Grid x:Name="CalendarView" Visibility="Collapsed">
+     <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+     <Border Background="{DynamicResource WidgetSurface}" CornerRadius="4" Margin="2,0,2,4" Padding="0,5">
+      <UniformGrid Columns="7">
+       <TextBlock Text="周一" HorizontalAlignment="Center"/><TextBlock Text="周二" HorizontalAlignment="Center"/><TextBlock Text="周三" HorizontalAlignment="Center"/><TextBlock Text="周四" HorizontalAlignment="Center"/><TextBlock Text="周五" HorizontalAlignment="Center"/><TextBlock Text="周六" HorizontalAlignment="Center"/><TextBlock Text="周日" HorizontalAlignment="Center"/>
+      </UniformGrid>
+     </Border>
+     <UniformGrid x:Name="CalendarDays" Grid.Row="1" Columns="7"/>
+    </Grid>
+   </Grid>
   </DockPanel>
   </Grid>
  </Border>
@@ -108,7 +123,7 @@ if (Test-Path $tokenPath) {
 '@
 $window = [Windows.Markup.XamlReader]::Load((New-Object Xml.XmlNodeReader $xaml))
 $ui = @{}
-'Header','Appearance','Settings','Pin','Refresh','Close','Previous','Day','Next','Input','Status','Tasks','ResizeHandle','WidgetFrame','BackgroundLayer','BackgroundFill','WallpaperOverlay' | ForEach-Object { $ui[$_] = $window.FindName($_) }
+'Header','Appearance','Settings','Pin','Refresh','Close','Previous','Day','Next','ViewToggle','Input','Status','Tasks','ListView','CalendarView','CalendarDays','ResizeHandle','WidgetFrame','BackgroundLayer','BackgroundFill','WallpaperOverlay' | ForEach-Object { $ui[$_] = $window.FindName($_) }
 function Get-WallpaperBitmap([string]$path) {
     $file = Get-Item -LiteralPath $path -ErrorAction Stop
     if ($file.PSIsContainer -or $file.Length -gt 50MB) { throw '请选择小于 50 MB 的图片文件。' }
@@ -160,6 +175,10 @@ function Apply-Background($value, [switch]$Strict) {
     $surfaceBrush.Opacity = $(if ($floatingControls) { 0.94 } else { 1 })
     $surfaceBrush.Freeze()
     $window.Resources['WidgetSurface'] = $surfaceBrush
+    $calendarSurface = $surfaceBrush.Clone()
+    $calendarSurface.Opacity = $(if ($floatingControls) { 0.18 } else { 0.4 })
+    $calendarSurface.Freeze()
+    $window.Resources['WidgetCalendarSurface'] = $calendarSurface
     $script:backgroundSettings = $normalized
 }
 function Apply-Theme($value) {
@@ -169,6 +188,12 @@ function Apply-Theme($value) {
         $brush = [Windows.Media.BrushConverter]::new().ConvertFromString($palette[$key])
         $brush.Freeze()
         $window.Resources['Widget' + $key] = $brush
+    }
+    foreach ($priority in 1..4) {
+        $priorityColor = switch ($priority) { 4 { '#ED7777' } 3 { '#EEB17C' } 2 { '#7EB9E8' } default { $normalized.Accent } }
+        $brush = [Windows.Media.BrushConverter]::new().ConvertFromString((Blend-ThemeColor $normalized.Background $priorityColor 0.42))
+        $brush.Freeze()
+        $window.Resources['WidgetCalendarPriority' + $priority] = $brush
     }
     $script:theme = $normalized
     Apply-Background $script:backgroundSettings
@@ -214,7 +239,6 @@ function Animate-Complete($check) {
     Start-Request 'Close' 'Post' ('tasks/' + $state.Id + '/close') $null $state
 }
 function Load-Tasks {
-    $ui.Day.Content = $script:date.ToString('yyyy年M月d日')
     Render-Tasks
     if ($script:busy -or $script:pending.Count) { return }
     if (!$script:token) { $ui.Status.Text='点击 ⚙ 输入 Todoist API Token 以连接账号。'; return }
@@ -222,11 +246,21 @@ function Load-Tasks {
     $ui.Status.Text='正在同步…'
     Start-Request 'Load' 'Get' 'tasks' $null $script:revision
 }
-function Render-Tasks {
-        $selected = $script:date.ToString('yyyy-MM-dd')
-        $items = @($script:cachedTasks | Where-Object { $_.due -and $_.due.date.Substring(0,10) -eq $selected -and !$script:pending.ContainsKey($_.id) } | Sort-Object @{Expression={$_.due.date}},order)
+function Render-DailyTasks {
+        $selected = $script:date.ToString('yyyy-MM-dd', [Globalization.CultureInfo]::InvariantCulture)
+        $candidates = @($script:cachedTasks)
+        $cachedIds = @{}
+        foreach ($task in $candidates) { $cachedIds[[string]$task.id] = $true }
+        foreach ($state in $script:pending.Values) {
+            if (!$cachedIds.ContainsKey([string]$state.Id)) { $candidates += $state.Task }
+        }
+        $items = @($candidates | Where-Object { (Get-TaskDateKey $_) -eq $selected } | Sort-Object @{Expression={$_.due.date}},order)
         $ui.Tasks.Children.Clear()
         foreach ($task in $items) {
+            if ($script:pending.ContainsKey($task.id)) {
+                $ui.Tasks.Children.Add($script:pending[$task.id].Border) | Out-Null
+                continue
+            }
             $border = New-Object Windows.Controls.Border
             $border.SetResourceReference([Windows.Controls.Border]::BorderBrushProperty, 'WidgetDivider')
             $border.BorderThickness = '0,0,0,1'; $border.Padding='2,10,2,10'
@@ -238,11 +272,166 @@ function Render-Tasks {
             $label = New-Object Windows.Controls.TextBlock
             $label.Text=$task.content; $label.TextWrapping='Wrap'; $label.FontSize=13
             $label.SetResourceReference([Windows.Controls.TextBlock]::ForegroundProperty, 'WidgetForeground')
-            $check.Tag=@{Id=$task.id; Border=$border; Label=$label; Check=$check}
+            $check.Tag=@{Id=$task.id; Border=$border; Label=$label; Check=$check; Task=$task}
             $row.Children.Add($label) | Out-Null
             $border.Child=$row; $ui.Tasks.Children.Add($border) | Out-Null
         }
-        $ui.Status.Text = "共 $($items.Count) 项 · 同步于 $([DateTime]::Now.ToString('HH:mm')) · 每分钟刷新"
+        $remaining = @($items | Where-Object { !$script:pending.ContainsKey($_.id) }).Count
+        $ui.Status.Text = "共 $remaining 项 · 同步于 $([DateTime]::Now.ToString('HH:mm')) · 每分钟刷新"
+}
+function Render-Calendar {
+    $days = @(Get-CalendarDays $script:date)
+    $groups = Get-CalendarTaskGroups $script:cachedTasks $script:pending
+    $ui.CalendarDays.Children.Clear()
+    $ui.CalendarDays.Rows = [int]($days.Count / 7)
+    $monthCount = 0
+    foreach ($date in $days) {
+        $key = $date.ToString('yyyy-MM-dd', [Globalization.CultureInfo]::InvariantCulture)
+        $tasks = @()
+        if ($groups.ContainsKey($key)) { $tasks = @($groups[$key]) }
+        $currentMonth = $date.Month -eq $script:date.Month -and $date.Year -eq $script:date.Year
+        if ($currentMonth) { $monthCount += $tasks.Count }
+        $cell = [Windows.Controls.Button]::new()
+        $cell.Tag = $date
+        $cell.Padding = '4'
+        $cell.Margin = '1'
+        $cell.MinHeight = 0
+        $cell.HorizontalContentAlignment = 'Stretch'
+        $cell.VerticalContentAlignment = 'Stretch'
+        $cell.SetResourceReference([Windows.Controls.Control]::BackgroundProperty, 'WidgetCalendarSurface')
+        if ($date.Date -eq $script:date.Date) {
+            $cell.SetResourceReference([Windows.Controls.Control]::BorderBrushProperty, 'WidgetAccent')
+            $cell.BorderThickness = '2'
+        } else { $cell.BorderThickness = '0.7' }
+        $content = [Windows.Controls.Grid]::new()
+        $content.ClipToBounds = $true
+        $content.RowDefinitions.Add([Windows.Controls.RowDefinition]::new())
+        $content.RowDefinitions[0].Height = 'Auto'
+        $content.RowDefinitions.Add([Windows.Controls.RowDefinition]::new())
+        $content.RowDefinitions.Add([Windows.Controls.RowDefinition]::new())
+        $content.RowDefinitions[2].Height = 'Auto'
+        $datePanel = [Windows.Controls.DockPanel]::new()
+        $datePanel.LastChildFill = $false
+        $dateLabel = [Windows.Controls.TextBlock]::new()
+        $dateLabel.Text = $date.Day.ToString()
+        $dateLabel.FontWeight = 'SemiBold'
+        $dateLabel.FontSize = 12
+        $dateLabel.Margin = '3,1,3,2'
+        if ($date.Date -eq [DateTime]::Today) {
+            $dateLabel.Text += ' 今天'
+            $dateLabel.SetResourceReference([Windows.Controls.TextBlock]::ForegroundProperty, 'WidgetAccent')
+        }
+        $datePanel.Children.Add($dateLabel) | Out-Null
+        if ($tasks.Count) {
+            $count = [Windows.Controls.TextBlock]::new()
+            $count.Text = "$($tasks.Count) 项"
+            $count.FontSize = 10
+            $count.Margin = '2,2,3,2'
+            [Windows.Controls.DockPanel]::SetDock($count, 'Right')
+            $datePanel.Children.Add($count) | Out-Null
+        }
+        $dateHeader = [Windows.Controls.Border]::new()
+        $dateHeader.CornerRadius = '3'
+        $dateHeader.SetResourceReference([Windows.Controls.Border]::BackgroundProperty, 'WidgetSurface')
+        $dateHeader.Child = $datePanel
+        if (!$currentMonth) { $dateHeader.Opacity = 0.6 }
+        $content.Children.Add($dateHeader) | Out-Null
+        $preview = [Windows.Controls.StackPanel]::new()
+        $preview.Margin = '0,3,0,0'
+        [Windows.Controls.Grid]::SetRow($preview, 1)
+        foreach ($task in @($tasks | Select-Object -First 3)) {
+            $taskLabel = [Windows.Controls.TextBlock]::new()
+            $taskLabel.Text = $task.content
+            $taskLabel.FontSize = 11
+            $taskLabel.TextTrimming = 'CharacterEllipsis'
+            $taskLabel.Margin = '4,0,4,0'
+            $taskLabel.SetResourceReference([Windows.Controls.TextBlock]::ForegroundProperty, 'WidgetForeground')
+            $strip = [Windows.Controls.Border]::new()
+            $strip.CornerRadius = '2'
+            $strip.Margin = '0,0,0,1'
+            $strip.Child = $taskLabel
+            $priority = [Math]::Max(1, [Math]::Min(4, [int]$task.priority))
+            $strip.SetResourceReference([Windows.Controls.Border]::BackgroundProperty, 'WidgetCalendarPriority' + $priority)
+            $preview.Children.Add($strip) | Out-Null
+        }
+        $content.Children.Add($preview) | Out-Null
+        $more = [Windows.Controls.TextBlock]::new()
+        $more.Text = "另有 $([Math]::Max(0, $tasks.Count - 3)) 项"
+        $more.FontSize = 10
+        $more.Margin = '3,1,0,0'
+        $more.Visibility = $(if ($tasks.Count -gt 3) { 'Visible' } else { 'Collapsed' })
+        $more.SetResourceReference([Windows.Controls.TextBlock]::ForegroundProperty, 'WidgetForeground')
+        $more.SetResourceReference([Windows.Controls.TextBlock]::BackgroundProperty, 'WidgetSurface')
+        [Windows.Controls.Grid]::SetRow($more, 2)
+        $content.Children.Add($more) | Out-Null
+        $content.Tag = @{Count=$tasks.Count; Header=$dateHeader; Preview=$preview; More=$more}
+        $content.Add_SizeChanged({
+            $state = $this.Tag
+            if (!$state.Count -or $this.ActualHeight -le 0) { return }
+            $available = [Math]::Max(0, $this.ActualHeight - $state.Header.ActualHeight - 3)
+            $rowHeight = 15.0
+            foreach ($strip in $state.Preview.Children) { $rowHeight = [Math]::Max($rowHeight, $strip.DesiredSize.Height) }
+            $shown = [Math]::Min(3, $state.Count)
+            if ($state.Count -gt 3 -or $shown * $rowHeight -gt $available) {
+                $shown = [Math]::Min($shown, [Math]::Max(0, [Math]::Floor(($available - 14) / $rowHeight)))
+            }
+            for ($index=0; $index -lt $state.Preview.Children.Count; $index++) {
+                $state.Preview.Children[$index].Visibility = $(if ($index -lt $shown) { 'Visible' } else { 'Collapsed' })
+            }
+            $state.More.Text = "另有 $($state.Count - $shown) 项"
+            $state.More.Visibility = $(if ($state.Count -gt $shown) { 'Visible' } else { 'Collapsed' })
+        })
+        $cell.Content = $content
+        $cell.ToolTip = $date.ToString('M月d日') + ' · 点击查看当天任务'
+        if ($tasks.Count) { $cell.ToolTip += "`n" + (($tasks | ForEach-Object { $_.content }) -join "`n") }
+        $cell.Add_Click({ $script:date = [DateTime]$this.Tag; Set-WidgetView 'List' })
+        $ui.CalendarDays.Children.Add($cell) | Out-Null
+    }
+    $ui.Status.Text = "本月 $monthCount 项 · 点击日期查看任务 · 每分钟刷新"
+}
+function Render-Tasks {
+    if ($script:viewMode -eq 'Calendar') {
+        $ui.Day.Content = $script:date.ToString('yyyy年M月')
+        $ui.Day.ToolTip = '返回本月'
+        $ui.Previous.ToolTip = '上个月'
+        $ui.Next.ToolTip = '下个月'
+        Render-Calendar
+    } else {
+        $ui.Day.Content = $script:date.ToString('yyyy年M月d日')
+        $ui.Day.ToolTip = '返回今天'
+        $ui.Previous.ToolTip = '前一天'
+        $ui.Next.ToolTip = '后一天'
+        Render-DailyTasks
+    }
+}
+function Set-WidgetView([ValidateSet('List','Calendar')][string]$Mode) {
+    if ($Mode -eq $script:viewMode) { Render-Tasks; return }
+    $script:viewSizes[$script:viewMode] = @{Width=$window.Width; Height=$window.Height}
+    $script:viewMode = $Mode
+    $calendar = $Mode -eq 'Calendar'
+    $ui.ListView.Visibility = $(if ($calendar) { 'Collapsed' } else { 'Visible' })
+    $ui.Input.Visibility = $(if ($calendar) { 'Collapsed' } else { 'Visible' })
+    $ui.CalendarView.Visibility = $(if ($calendar) { 'Visible' } else { 'Collapsed' })
+    $ui.ViewToggle.Content = $(if ($calendar) { '列表' } else { '月历' })
+    $ui.ViewToggle.ToolTip = $(if ($calendar) { '切换到每日任务列表' } else { '切换到完整月历' })
+    $window.MinWidth = $(if ($calendar) { 560 } else { 340 })
+    $window.MinHeight = $(if ($calendar) { 440 } else { 240 })
+    $window.Width = $script:viewSizes[$Mode].Width
+    $window.Height = $script:viewSizes[$Mode].Height
+    # Keep an expanded calendar on the widget's current monitor.
+    Add-Type -AssemblyName System.Windows.Forms
+    $handle = [Windows.Interop.WindowInteropHelper]::new($window).Handle
+    $area = [Windows.Forms.Screen]::FromHandle($handle).WorkingArea
+    $dpi = [Windows.PresentationSource]::FromVisual($window)
+    $scaleX = 1.0; $scaleY = 1.0
+    if ($dpi) { $scaleX = $dpi.CompositionTarget.TransformToDevice.M11; $scaleY = $dpi.CompositionTarget.TransformToDevice.M22 }
+    $left = $area.Left / $scaleX; $top = $area.Top / $scaleY
+    $right = $area.Right / $scaleX; $bottom = $area.Bottom / $scaleY
+    $window.Width = [Math]::Max($window.MinWidth, [Math]::Min($window.Width, $area.Width / $scaleX))
+    $window.Height = [Math]::Max($window.MinHeight, [Math]::Min($window.Height, $area.Height / $scaleY))
+    if (![double]::IsNaN($window.Left)) { $window.Left = [Math]::Max($left, [Math]::Min($window.Left, $right - $window.Width)) }
+    if (![double]::IsNaN($window.Top)) { $window.Top = [Math]::Max($top, [Math]::Min($window.Top, $bottom - $window.Height)) }
+    Render-Tasks
 }
 function Configure-Theme {
     $originalTheme = Get-NormalizedTheme $script:theme
@@ -434,7 +623,7 @@ function Configure {
     $dialog = New-Object Windows.Window
     $dialog.Title='连接 Todoist'; $dialog.Width=420; $dialog.Height=205; $dialog.ResizeMode='NoResize'; $dialog.Owner=$window; $dialog.WindowStartupLocation='CenterOwner'
     $panel=New-Object Windows.Controls.StackPanel; $panel.Margin='16'
-    $label=New-Object Windows.Controls.TextBlock; $label.Text="Todoist → 设置 → 集成 → 开发者 → API Token`n密钥使用 Windows 当前用户加密保存。"; $label.Margin='0,0,0,12'
+    $label=New-Object Windows.Controls.TextBlock; $label.Text="Todoist → 设置 → 关联应用 → 开发者`n复制 API Token；密钥使用 Windows 当前用户加密保存。"; $label.Margin='0,0,0,12'
     $password=New-Object Windows.Controls.PasswordBox; $password.Password=$script:token; $password.Padding='6'
     $save=New-Object Windows.Controls.Button; $save.Content='保存并连接'; $save.Margin='0,12,0,0'; $save.Padding='6'
     $save.Add_Click({ if ($password.Password.Trim()) { Save-Token $password.Password.Trim(); $dialog.DialogResult=$true } })
@@ -467,8 +656,9 @@ $ui.Appearance.Add_Click({ Configure-Theme })
 $ui.Pin.Add_Click({ $window.Topmost = !$window.Topmost; $ui.Pin.Opacity = $(if ($window.Topmost) {1} else {0.45}) })
 $ui.Close.Add_Click({ $window.Close() })
 $ui.Refresh.Add_Click({ Load-Tasks })
-$ui.Previous.Add_Click({ $script:date=$script:date.AddDays(-1); Load-Tasks })
-$ui.Next.Add_Click({ $script:date=$script:date.AddDays(1); Load-Tasks })
+$ui.ViewToggle.Add_Click({ Set-WidgetView $(if ($script:viewMode -eq 'List') { 'Calendar' } else { 'List' }) })
+$ui.Previous.Add_Click({ $script:date = $(if ($script:viewMode -eq 'Calendar') { $script:date.AddMonths(-1) } else { $script:date.AddDays(-1) }); Load-Tasks })
+$ui.Next.Add_Click({ $script:date = $(if ($script:viewMode -eq 'Calendar') { $script:date.AddMonths(1) } else { $script:date.AddDays(1) }); Load-Tasks })
 $ui.Day.Add_Click({ $script:date=[DateTime]::Today; Load-Tasks })
 $ui.Input.Add_KeyDown({
     if ($_.Key -eq 'Return' -and $ui.Input.Text.Trim() -and $script:token) {

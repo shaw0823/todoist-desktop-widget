@@ -1,6 +1,6 @@
 # Todoist 桌面小组件
 
-一个连接 Todoist 官方 API 的轻量 Windows 桌面显示组件。可悬浮置顶、按日期查看任务、勾选完成、自定义颜色、壁纸与透明背景；支持在打开 Todoist 时跟随启动，关闭 Todoist 后继续独立显示和同步任务。
+一个连接 Todoist 官方 API 的轻量 Windows 桌面显示组件。可悬浮置顶、切换每日列表与完整月历、勾选完成、自定义颜色、壁纸与透明背景；支持在打开 Todoist 时跟随启动，关闭 Todoist 后继续独立显示和同步任务。
 
 这是独立桌面工具，需要在本机运行，不是安装到 Todoist 客户端内部的扩展。
 
@@ -29,6 +29,16 @@
 - 勾选后立即变色并显示删除线，后台同步成功后淡出收起；同步失败会恢复任务。循环任务由 Todoist 推进到下一次日期。
 - 输入任务内容并回车，添加到所选日期。
 - Token 使用 Windows DPAPI 当前用户加密，保存在 `%LOCALAPPDATA%\TodoistDesktopWidget\token.dat`。
+
+## 列表与月历切换
+
+点击日期旁的 **月历**，展开完整月份的周一至周日网格。每天显示任务数量和最多三项任务摘要，更多任务通过“另有 N 项”提示；窗口缩小时会自动减少摘要行，悬停可查看完整任务标题。色条按 Todoist 优先级区分，普通任务使用自定义强调色。
+
+月历中的左右箭头切换月份，点击月份标题返回本月。点击某一天，回到该日列表，可继续添加任务或勾选完成；点击 **列表** 切回当前所选日期的列表。列表中的箭头仍用于切换前后一天。
+
+两种视图在本次运行中分别保留调整后的窗口大小。月历沿用当前颜色、壁纸、透明度和置顶状态；切换直接使用已同步的任务，后台仍每分钟刷新。
+
+月历显示有日期的未完成任务。循环任务按 Todoist 当前到期日期显示，完成后推进到下一次。
 
 ## 自定义颜色
 
@@ -82,6 +92,8 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\verify-theme.ps1
 powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File .\verify-theme-ui.ps1
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\verify-background.ps1
 powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File .\verify-wallpaper-ui.ps1
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\verify-calendar.ps1
+powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File .\verify-calendar-ui.ps1
 ```
 
 测试使用模拟网络响应和进程状态，不读取真实 API Token，也不会调用 Todoist API。动画测试会短暂显示一个测试窗口。
