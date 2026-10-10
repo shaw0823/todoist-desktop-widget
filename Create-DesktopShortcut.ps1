@@ -3,7 +3,7 @@ $scriptFile = Join-Path $PSScriptRoot 'Start.ps1'
 if (![IO.File]::Exists($scriptFile)) { throw 'Missing Start.ps1' }
 $desktopFolder = [Environment]::GetFolderPath('DesktopDirectory')
 if (!$desktopFolder -or ![IO.Directory]::Exists($desktopFolder)) { throw 'Windows Desktop folder is unavailable.' }
-$shortcutPath = Join-Path $desktopFolder 'todoist widge.lnk'
+$shortcutPath = Join-Path $desktopFolder 'Todoist Widget.lnk'
 $powershellExe = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
 $shell = New-Object -ComObject WScript.Shell
 $iconLocation = $powershellExe + ',0'
@@ -38,6 +38,13 @@ $shortcut.Save()
 $verified = $shell.CreateShortcut($shortcutPath)
 if ($verified.TargetPath -ine $powershellExe -or $verified.Arguments -cne $arguments -or $verified.IconLocation -cne $iconLocation) {
     throw 'Desktop shortcut verification failed.'
+}
+$oldShortcutPath = Join-Path $desktopFolder 'todoist widge.lnk'
+if ([IO.File]::Exists($oldShortcutPath)) {
+    $oldShortcut = $shell.CreateShortcut($oldShortcutPath)
+    if ($oldShortcut.TargetPath -ieq $powershellExe -and $oldShortcut.Arguments -ceq $arguments) {
+        [IO.File]::Delete($oldShortcutPath)
+    }
 }
 Write-Output ('已创建桌面快捷方式：' + $shortcutPath)
 Write-Output ('图标：' + $verified.IconLocation)

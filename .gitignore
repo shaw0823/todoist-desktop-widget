@@ -7,8 +7,11 @@ credentials*
 theme.json
 background.json
 window-position.json
+clock.json
 .window-position-test-*/
 .window-position-ui-test-*/
+.clock-test-*/
+.clock-ui-test-*/
 *.tmp
 .theme-ui-test-*/
 .background-test-*/

@@ -13,7 +13,10 @@ $tokenPath = Join-Path $dataDir 'token.dat'
 . (Join-Path $PSScriptRoot 'Calendar.ps1')
 . (Join-Path $PSScriptRoot 'FollowSettings.ps1')
 . (Join-Path $PSScriptRoot 'WindowPosition.ps1')
+. (Join-Path $PSScriptRoot 'ClockSettings.ps1')
 $windowPositionPath = Join-Path $dataDir 'window-position.json'
+$clockSettingsPath = Join-Path $dataDir 'clock.json'
+$script:clockFormat = (Read-ClockSettings -Path $clockSettingsPath).Format
 $script:positionReady = $false
 $themePath = Join-Path $dataDir 'theme.json'
 $script:theme = Read-Theme $themePath
@@ -104,9 +107,10 @@ if (Test-Path $tokenPath) {
   <DockPanel Margin="10">
    <StackPanel DockPanel.Dock="Top">
     <Grid x:Name="Header" Background="#01000000" MinHeight="30" Cursor="SizeAll" ToolTip="拖动标题或顶部空白处移动组件" Margin="0,0,0,8">
-     <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+     <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
      <TextBlock Text="☀ Todoist" FontWeight="Bold" VerticalAlignment="Center"/>
-     <StackPanel Grid.Column="1" Orientation="Horizontal"><Button x:Name="Appearance" Content="◐" ToolTip="颜色、壁纸和透明度"/><Button x:Name="Settings" Content="⚙" ToolTip="连接和启动设置"/><Button x:Name="Pin" Content="📌" ToolTip="切换置顶" Background="{DynamicResource WidgetAccent}" Foreground="{DynamicResource WidgetBackground}"/><Button x:Name="Refresh" Content="↻" ToolTip="刷新"/><Button x:Name="Close" Content="×" ToolTip="关闭"/></StackPanel>
+     <TextBlock x:Name="Clock" Grid.Column="1" Margin="7,0,3,0" HorizontalAlignment="Right" VerticalAlignment="Center" FontSize="12" Foreground="{DynamicResource WidgetMuted}"/>
+     <StackPanel Grid.Column="2" Orientation="Horizontal"><Button x:Name="Appearance" Content="◐" ToolTip="颜色、壁纸和透明度"/><Button x:Name="Settings" Content="⚙" ToolTip="连接、启动和时钟设置"/><Button x:Name="Pin" Content="📌" ToolTip="切换置顶" Background="{DynamicResource WidgetAccent}" Foreground="{DynamicResource WidgetBackground}"/><Button x:Name="Refresh" Content="↻" ToolTip="刷新"/><Button x:Name="Close" Content="×" ToolTip="关闭"/></StackPanel>
     </Grid>
     <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,0,0,8"><Button x:Name="Previous" Content="‹"/><Button x:Name="Day" Content="今天"/><Button x:Name="Next" Content="›"/><Button x:Name="ViewToggle" Content="月历" ToolTip="切换到完整月历" Margin="10,2,2,2"/></StackPanel>
     <TextBox x:Name="Input" Background="{DynamicResource WidgetSurface}" Foreground="{DynamicResource WidgetForeground}" CaretBrush="{DynamicResource WidgetForeground}" BorderBrush="{DynamicResource WidgetControlBorder}" BorderThickness="1.5" Padding="9" Margin="0,0,0,8" ToolTip="输入任务内容，回车添加到当前日期"/>
@@ -135,7 +139,7 @@ if (Test-Path $tokenPath) {
 '@
 $window = [Windows.Markup.XamlReader]::Load((New-Object Xml.XmlNodeReader $xaml))
 $ui = @{}
-'Header','Appearance','Settings','Pin','Refresh','Close','Previous','Day','Next','ViewToggle','Input','Status','Tasks','ListView','CalendarView','CalendarDays','ResizeHandle','WidgetFrame','BackgroundLayer','BackgroundFill','WallpaperOverlay' | ForEach-Object { $ui[$_] = $window.FindName($_) }
+'Header','Clock','Appearance','Settings','Pin','Refresh','Close','Previous','Day','Next','ViewToggle','Input','Status','Tasks','ListView','CalendarView','CalendarDays','ResizeHandle','WidgetFrame','BackgroundLayer','BackgroundFill','WallpaperOverlay' | ForEach-Object { $ui[$_] = $window.FindName($_) }
 $window.Width = $script:viewSizes.List.Width
 $window.Height = $script:viewSizes.List.Height
 function Save-WidgetPosition {
@@ -681,6 +685,10 @@ function Configure-Theme {
         }
     }
 }
+function Update-ClockDisplay {
+    $text = Format-WidgetClock -DateTime ([DateTime]::Now) -Format $script:clockFormat
+    if ($ui.Clock.Text -cne $text) { $ui.Clock.Text = $text }
+}
 function Start-FollowUpdate([bool]$Enabled, $Context) {
     $worker = [PowerShell]::Create()
     try {
@@ -703,9 +711,19 @@ function Configure {
   <Border Background="#E9EEF0" CornerRadius="6" Padding="12" Margin="0,14,0,0">
    <StackPanel>
     <TextBlock Text="启动联动" FontSize="14" FontWeight="SemiBold" Margin="0,0,0,10"/>
-    <CheckBox x:Name="FollowStartup" Content="打开 Todoist 时自动启动 todoist widge" FontSize="13"/>
+    <CheckBox x:Name="FollowStartup" Content="打开 Todoist 时自动启动 Todoist Widget" FontSize="13"/>
     <TextBlock x:Name="FollowStatus" Foreground="#59636A" TextWrapping="Wrap" FontSize="11" Margin="20,6,0,0"/>
     <TextBlock Text="关闭 Todoist 后，本应用继续运行。也可以通过桌面快捷方式独立打开。" Foreground="#59636A" TextWrapping="Wrap" FontSize="11" Margin="0,12,0,0"/>
+   </StackPanel>
+  </Border>
+  <Border Background="#E9EEF0" CornerRadius="6" Padding="12" Margin="0,10,0,0">
+   <StackPanel>
+    <TextBlock Text="时钟" FontSize="14" FontWeight="SemiBold" Margin="0,0,0,8"/>
+    <ComboBox x:Name="ClockFormat" HorizontalAlignment="Left" MinWidth="150" Padding="6,3">
+     <ComboBoxItem Content="24 小时制" Tag="24h"/>
+     <ComboBoxItem Content="12 小时制" Tag="12h"/>
+    </ComboBox>
+    <TextBlock x:Name="ClockFormatStatus" Foreground="#59636A" TextWrapping="Wrap" FontSize="11" Margin="0,6,0,0"/>
    </StackPanel>
   </Border>
   <Button x:Name="CloseSettings" Content="关闭" IsCancel="True" HorizontalAlignment="Right" MinWidth="75" Padding="8,5" Margin="0,14,0,0"/>
@@ -749,6 +767,26 @@ function Configure {
             $state.Check.IsEnabled = $true
             $state.Message.Text = '修改失败，请重试。'
             $state.Message.Foreground = [Windows.Media.Brushes]::Firebrick
+        }
+    })
+    $clockChoice = $dialog.FindName('ClockFormat')
+    $clockStatus = $dialog.FindName('ClockFormatStatus')
+    $clockChoice.SelectedIndex = $(if ($script:clockFormat -eq '12h') { 1 } else { 0 })
+    $clockStatus.Text = '切换后立即保存，只影响顶部时间显示。'
+    $clockChoice.Add_SelectionChanged({
+        if ($null -eq $this.SelectedItem) { return }
+        $desiredFormat = [string]$this.SelectedItem.Tag
+        if ($desiredFormat -eq $script:clockFormat) { return }
+        try {
+            Save-ClockSettings -Format $desiredFormat -Path $clockSettingsPath
+            $script:clockFormat = $desiredFormat
+            Update-ClockDisplay
+            $clockStatus.Foreground = [Windows.Media.Brushes]::DimGray
+            $clockStatus.Text = '时钟格式已保存。'
+        } catch {
+            $this.SelectedIndex = $(if ($script:clockFormat -eq '12h') { 1 } else { 0 })
+            $clockStatus.Foreground = [Windows.Media.Brushes]::Firebrick
+            $clockStatus.Text = '保存时钟格式失败，请重试。'
         }
     })
     if ($dialog.ShowDialog()) { Load-Tasks }
@@ -861,6 +899,11 @@ $poll.Add_Tick({
     }
 })
 $poll.Start()
+$clockTimer = [Windows.Threading.DispatcherTimer]::new()
+$clockTimer.Interval = [TimeSpan]::FromMilliseconds(250)
+$clockTimer.Add_Tick({ Update-ClockDisplay })
+Update-ClockDisplay
+$clockTimer.Start()
 $timer=New-Object Windows.Threading.DispatcherTimer
 $timer.Interval=[TimeSpan]::FromMinutes(1); $timer.Add_Tick({ Load-Tasks }); $timer.Start()
 $window.Add_ContentRendered({ Load-Tasks })
@@ -884,7 +927,7 @@ $window.Add_Closing({ $positionSaveTimer.Stop(); Save-WidgetPosition })
 $window.Add_Closed({
     $positionSaveTimer.Stop()
     $script:positionReady = $false
-    $timer.Stop(); $poll.Stop()
+    $timer.Stop(); $poll.Stop(); $clockTimer.Stop()
     foreach ($job in $script:jobs) { if ($job.Worker) { $job.Worker.Stop(); $job.Worker.Dispose() } }
 })
 $window.ShowDialog() | Out-Null

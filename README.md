@@ -1,6 +1,6 @@
-# todoist widge
+# Todoist Widget
 
-todoist widge 是一个基于 Todoist 官方 API 的第三方独立 Windows 任务应用。Todoist 提供任务数据和同步服务，应用提供每日列表、完整月历、任务添加与完成、悬浮置顶，以及自定义颜色、壁纸和透明背景。
+Todoist Widget 是一个基于 Todoist 官方 API 的第三方独立 Windows 任务应用。Todoist 提供任务数据和同步服务，应用提供每日列表、完整月历、任务添加与完成、悬浮置顶、实时时钟，以及自定义颜色、壁纸和透明背景。
 
 应用可直接通过桌面快捷方式启动。连接 Todoist 账号后，无需打开 Todoist 桌面客户端，也能读取和同步任务；跟随 Todoist 启动是可选功能。
 
@@ -19,7 +19,7 @@ todoist widge 是一个基于 Todoist 官方 API 的第三方独立 Windows 任�
 3. 在 Todoist 打开 **设置 → 关联应用 → 开发者**，找到并复制 API Token。
 4. 点击应用中的 **⚙**，在本机粘贴 Token，选择“保存并连接”。
 
-双击 **创建桌面快捷方式.cmd**，会在桌面创建名为 **todoist widge** 的快捷方式；以后可直接双击它打开应用。本机已安装 Todoist 时沿用其图标。请保留项目文件夹；移动后重新创建快捷方式。
+双击 **创建桌面快捷方式.cmd**，会在桌面创建名为 **Todoist Widget** 的快捷方式；以后可直接双击它打开应用。本机已安装 Todoist 时沿用其图标。请保留项目文件夹；移动后重新创建快捷方式。
 
 密钥使用 Windows DPAPI 当前用户加密，保存在 `%LOCALAPPDATA%\TodoistDesktopWidget\token.dat`。它不会写入项目目录，也无需发送给别人。源码和打包文件不包含账号密钥或个人任务。
 
@@ -31,6 +31,10 @@ todoist widge 是一个基于 Todoist 官方 API 的第三方独立 Windows 任�
 - 勾选后立即变色并显示删除线，后台同步成功后淡出收起；同步失败会恢复任务。循环任务由 Todoist 推进到下一次日期。
 - 输入任务内容并回车，添加到所选日期。
 - Token 使用 Windows DPAPI 当前用户加密，保存在 `%LOCALAPPDATA%\TodoistDesktopWidget\token.dat`。
+
+## 顶部时钟
+
+标题栏显示当前本地时间，包含小时、分钟和秒，运行时持续更新。默认使用 24 小时制；在 **⚙ 设置 → 时钟** 中可切换为 12 小时制，显示“上午”或“下午”。切换后立即生效并保存在本机 `%LOCALAPPDATA%\TodoistDesktopWidget\clock.json`，下次打开继续使用。
 
 ## 列表与月历切换
 
@@ -64,7 +68,7 @@ todoist widge 是一个基于 Todoist 官方 API 的第三方独立 Windows 任�
 
 ## 可选：跟随 Todoist 打开
 
-点击应用中的 **⚙ 设置**，在“启动联动”中打开 **打开 Todoist 时自动启动 todoist widge**。切换会立即保存并生效，登录 Windows 后继续沿用；设置页会显示当前是否开启。
+点击应用中的 **⚙ 设置**，在“启动联动”中打开 **打开 Todoist 时自动启动 Todoist Widget**。切换会立即保存并生效，登录 Windows 后继续沿用；设置页会显示当前是否开启。
 
 之后继续使用原来的 Todoist 图标，本应用会在 Todoist 主窗口稳定显示约一秒后跟随打开。已经打开的应用不会重复打开；手动关闭应用后，同一次 Todoist 使用期间不会反复弹出。从托盘关闭并重新打开 Todoist 窗口也会触发联动。
 
@@ -108,6 +112,8 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\verify-follow-settings
 powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File .\verify-follow-settings-ui.ps1
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\verify-window-position.ps1
 powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File .\verify-window-position-ui.ps1
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\verify-clock-settings.ps1
+powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File .\verify-clock-ui.ps1
 ```
 
 测试使用模拟网络响应和进程状态，不读取真实 API Token，也不会调用 Todoist API。动画测试会短暂显示一个测试窗口。

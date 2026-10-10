@@ -26,7 +26,7 @@ function Write-FollowShortcut([string]$Path, [string]$WatcherPath) {
     $link.Arguments = "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$WatcherPath`""
     $link.WorkingDirectory = $script:followSettingsRoot
     $link.WindowStyle = 7
-    $link.Description = '打开 Todoist 时自动启动 todoist widge'
+    $link.Description = '打开 Todoist 时自动启动 Todoist Widget'
     $link.Save()
 }
 function Start-FollowWatcher([string]$WatcherPath, [switch]$SkipInitialOpen) {

@@ -17,6 +17,8 @@ $followSettingsModulePath=(Join-Path $PSScriptRoot 'FollowSettings.ps1').Replace
 $source=$source.Replace(". (Join-Path `$PSScriptRoot 'FollowSettings.ps1')", ". '$followSettingsModulePath'")
 $positionModulePath=(Join-Path $PSScriptRoot 'WindowPosition.ps1').Replace("'", "''")
 $source=$source.Replace(". (Join-Path `$PSScriptRoot 'WindowPosition.ps1')", ". '$positionModulePath'")
+$clockModulePath=(Join-Path $PSScriptRoot 'ClockSettings.ps1').Replace("'", "''")
+$source=$source.Replace(". (Join-Path `$PSScriptRoot 'ClockSettings.ps1')", ". '$clockModulePath'")
 $source=$source.Replace("`$backgroundPath = Join-Path `$dataDir 'background.json'", "`$backgroundPath = Join-Path `$dataDir 'animation-test-no-background.json'")
 $source=$source.Replace("`$themePath = Join-Path `$dataDir 'theme.json'", "`$themePath = Join-Path `$dataDir 'animation-test-no-theme.json'")
 $source=$source.Replace('$widgetMutex = Enter-WidgetMutex $widgetMutexName', '$widgetMutex = Enter-WidgetMutex ($widgetMutexName + "-animation-test")')
