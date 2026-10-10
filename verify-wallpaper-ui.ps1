@@ -36,7 +36,7 @@ function Assert-TransparentDragRegion {
     Assert-Equal $ui.Header.Opacity 1.0 'Header is independent of transparent background layer'
     if (!(Test-HeaderDragSource $ui.Header) -or !(Test-HeaderDragSource $ui.Header.Children[0])) { throw 'Header or title is not draggable' }
     if (!(Test-HeaderDragSource $ui.Header.Children[0].Inlines.FirstInline)) { throw 'Title inline is not draggable' }
-    foreach ($button in @($ui.Appearance,$ui.Settings,$ui.Pin,$ui.Refresh,$ui.Close)) {
+    foreach ($button in @($ui.MenuButton,$ui.Pin,$ui.Refresh,$ui.Close)) {
         $button.ApplyTemplate() | Out-Null
         if (Test-HeaderDragSource $button) { throw 'Header button incorrectly starts dragging' }
         if (Test-HeaderDragSource ([Windows.Media.VisualTreeHelper]::GetChild($button,0))) { throw 'Button template incorrectly starts dragging' }

@@ -116,7 +116,12 @@ function Test-FollowDialog([bool]$Initial, $Desired, [bool]$Fail = $false, [bool
         }
     })
     $testTimer.Start()
-    try { Configure } finally { $testTimer.Stop() }
+    try {
+        $ui.MenuButton.RaiseEvent([Windows.RoutedEventArgs]::new([Windows.Controls.Primitives.ButtonBase]::ClickEvent))
+        if (!$ui.MenuButton.ContextMenu.IsOpen) { throw 'Settings menu did not open.' }
+        $ui.SettingsMenuItem.RaiseEvent([Windows.RoutedEventArgs]::new([Windows.Controls.MenuItem]::ClickEvent))
+        if ($ui.MenuButton.ContextMenu.IsOpen) { throw 'Settings menu stayed open over settings dialog.' }
+    } finally { $testTimer.Stop() }
     if ($testTimer.Tag.Failure) { throw $testTimer.Tag.Failure }
     if (!$testTimer.Tag.Completed) { throw 'Settings test did not complete its dialog operation.' }
 }

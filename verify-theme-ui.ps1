@@ -52,7 +52,12 @@ function Test-ThemeDialog([string]$mode) {
         }
     })
     $testTimer.Start()
-    try { Configure-Theme } finally { $testTimer.Stop() }
+    try {
+        $ui.MenuButton.RaiseEvent([Windows.RoutedEventArgs]::new([Windows.Controls.Primitives.ButtonBase]::ClickEvent))
+        if (!$ui.MenuButton.ContextMenu.IsOpen) { throw 'Settings menu did not open for appearance.' }
+        $ui.AppearanceMenuItem.RaiseEvent([Windows.RoutedEventArgs]::new([Windows.Controls.MenuItem]::ClickEvent))
+        if ($ui.MenuButton.ContextMenu.IsOpen) { throw 'Settings menu stayed open over appearance dialog.' }
+    } finally { $testTimer.Stop() }
     if ($testTimer.Tag.Failure) { throw $testTimer.Tag.Failure }
     if (!$testTimer.Tag.Completed) { throw 'Theme dialog action did not run' }
 }
@@ -63,6 +68,10 @@ try {
     $persisted = Read-Theme $themePath
     if ($persisted.Background -ne '#F4F6F8' -or $script:theme.Background -ne '#F4F6F8') { throw 'Save did not persist the theme' }
     if ($ui.BackgroundFill.Background.Color.ToString() -ne '#FFF4F6F8') { throw 'Widget background did not update' }
+    $ui.MenuButton.RaiseEvent([Windows.RoutedEventArgs]::new([Windows.Controls.Primitives.ButtonBase]::ClickEvent))
+    if (!$ui.MenuButton.ContextMenu.IsOpen) { throw 'Settings menu cannot reopen after theme change.' }
+    if ($ui.MenuButton.ContextMenu.Background.Color -ne $window.Resources['WidgetSurface'].Color) { throw 'Settings menu did not adopt the saved theme.' }
+    $ui.MenuButton.ContextMenu.IsOpen = $false
     'PASS: live preview, input validation, cancel rollback, presets, UI save and reload'
 } finally {
     $window.Close()

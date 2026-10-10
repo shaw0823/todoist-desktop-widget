@@ -25,7 +25,7 @@ function Test-HeaderLayout([double]$Width, [string]$Format) {
     $ui.Clock.Text = Format-WidgetClock -DateTime ([DateTime]::new(2026, 10, 10, 13, 59, 59)) -Format $Format
     $window.UpdateLayout()
     $title = Get-HeaderBounds $ui.Header.Children[0]
-    $buttons = Get-HeaderBounds $ui.Appearance.Parent
+    $buttons = Get-HeaderBounds $ui.MenuButton.Parent
     if ($title.Right -gt $buttons.Left + 1 -or $buttons.Right -gt $ui.Header.ActualWidth + 1) {
         throw "Header controls overlap or overflow at $Width px in $Format format."
     }
@@ -105,9 +105,16 @@ try {
     Test-HeaderLayout 340 '24h'
     Test-HeaderLayout 340 '12h'
     if (!(Test-HeaderDragSource $ui.Clock)) { throw 'Clock surface cannot be used to move the widget.' }
-    if (Test-HeaderDragSource $ui.Settings) { throw 'Settings button was mistaken for a drag handle.' }
+    if (Test-HeaderDragSource $ui.MenuButton) { throw 'Menu button was mistaken for a drag handle.' }
     Apply-Background @{ Mode='Color'; ImagePath=''; Opacity=0.0; Overlay=0.5 }
     Test-HeaderLayout 340 '12h'
+    $ui.MenuButton.RaiseEvent([Windows.RoutedEventArgs]::new([Windows.Controls.Primitives.ButtonBase]::ClickEvent))
+    if (!$ui.MenuButton.ContextMenu.IsOpen) { throw 'Menu cannot open over a transparent background.' }
+    if ($ui.MenuButton.ContextMenu.Background.Opacity -lt 0.9) { throw 'Menu surface is too transparent to read over a wallpaper.' }
+    foreach ($item in @($ui.MenuButton.ContextMenu.Items)) {
+        if ($item.Foreground.Color -ne $window.Resources['WidgetForeground'].Color) { throw 'Menu item text does not use the readable theme foreground.' }
+    }
+    $ui.MenuButton.ContextMenu.IsOpen = $false
     $window.Width = 400
     Update-ClockDisplay
 

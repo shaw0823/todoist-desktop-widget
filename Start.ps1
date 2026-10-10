@@ -112,7 +112,39 @@ if (Test-Path $tokenPath) {
     <Grid x:Name="Header" Background="#01000000" MinHeight="30" Cursor="SizeAll" ToolTip="拖动标题或顶部空白处移动组件" Margin="0,0,0,8">
      <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
      <TextBlock Text="☀ Todoist" FontWeight="Bold" VerticalAlignment="Center"/>
-     <StackPanel Grid.Column="2" Orientation="Horizontal"><Button x:Name="DisplayOptions" Content="☷" ToolTip="显示内容开关"/><Button x:Name="Appearance" Content="◐" ToolTip="颜色、壁纸和透明度"/><Button x:Name="Settings" Content="⚙" ToolTip="连接、启动和时钟设置"/><Button x:Name="Pin" Content="📌" ToolTip="切换置顶" Background="{DynamicResource WidgetAccent}" Foreground="{DynamicResource WidgetBackground}"/><Button x:Name="Refresh" Content="↻" ToolTip="刷新"/><Button x:Name="Close" Content="×" ToolTip="关闭"/></StackPanel>
+     <StackPanel Grid.Column="2" Orientation="Horizontal">
+      <Button x:Name="MenuButton" Content="⚙" ToolTip="菜单：外观、显示内容和设置" AutomationProperties.Name="菜单">
+       <Button.ContextMenu>
+        <ContextMenu Background="{DynamicResource WidgetSurface}" BorderBrush="{DynamicResource WidgetControlBorder}" BorderThickness="1" Padding="4">
+         <ContextMenu.Resources>
+          <Style TargetType="MenuItem">
+           <Setter Property="Background" Value="{DynamicResource WidgetSurface}"/>
+           <Setter Property="Foreground" Value="{DynamicResource WidgetForeground}"/>
+           <Setter Property="FontSize" Value="13"/>
+           <Setter Property="MinWidth" Value="120"/>
+           <Setter Property="Padding" Value="10,7"/>
+           <Setter Property="Cursor" Value="Hand"/>
+           <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="MenuItem">
+            <Border x:Name="MenuChrome" Background="{TemplateBinding Background}" CornerRadius="4" Padding="{TemplateBinding Padding}">
+             <TextBlock Text="{TemplateBinding Header}" Foreground="{TemplateBinding Foreground}"/>
+            </Border>
+            <ControlTemplate.Triggers>
+             <Trigger Property="IsHighlighted" Value="True"><Setter TargetName="MenuChrome" Property="Background" Value="{DynamicResource WidgetAccent}"/><Setter Property="Foreground" Value="{DynamicResource WidgetBackground}"/></Trigger>
+             <Trigger Property="IsEnabled" Value="False"><Setter TargetName="MenuChrome" Property="Opacity" Value="0.5"/></Trigger>
+            </ControlTemplate.Triggers>
+           </ControlTemplate></Setter.Value></Setter>
+          </Style>
+         </ContextMenu.Resources>
+         <MenuItem x:Name="AppearanceMenuItem" Header="外观" ToolTip="颜色、壁纸和透明度"/>
+         <MenuItem x:Name="DisplayMenuItem" Header="显示内容" ToolTip="时间、月历和列表开关"/>
+         <MenuItem x:Name="SettingsMenuItem" Header="设置" ToolTip="连接、启动和时钟设置"/>
+        </ContextMenu>
+       </Button.ContextMenu>
+      </Button>
+      <Button x:Name="Pin" Content="📌" ToolTip="切换置顶" Background="{DynamicResource WidgetAccent}" Foreground="{DynamicResource WidgetBackground}"/>
+      <Button x:Name="Refresh" Content="↻" ToolTip="刷新"/>
+      <Button x:Name="Close" Content="×" ToolTip="关闭"/>
+     </StackPanel>
     </Grid>
     <Border x:Name="ClockSurface" HorizontalAlignment="Center" Background="{DynamicResource WidgetSurface}" BorderBrush="{DynamicResource WidgetControlBorder}" BorderThickness="1" CornerRadius="8" Padding="16,4" Margin="0,0,0,8" Cursor="SizeAll" ToolTip="拖动时钟移动组件">
      <TextBlock x:Name="Clock" FontFamily="Segoe UI Variable Display, Segoe UI" FontWeight="SemiBold" FontSize="22" Typography.NumeralAlignment="Tabular" TextAlignment="Center" Foreground="{DynamicResource WidgetForeground}"/>
@@ -132,7 +164,7 @@ if (Test-Path $tokenPath) {
      </Border>
      <UniformGrid x:Name="CalendarDays" Grid.Row="1" Columns="7"/>
     </Grid>
-    <TextBlock x:Name="NoViewsHint" Text="月历和列表已关闭。点击 ☷ 可重新开启。" Foreground="{DynamicResource WidgetMuted}" TextWrapping="Wrap" TextAlignment="Center" HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="Collapsed"/>
+    <TextBlock x:Name="NoViewsHint" Text="月历和列表已关闭。点击 ⚙ → 显示内容可重新开启。" Foreground="{DynamicResource WidgetMuted}" TextWrapping="Wrap" TextAlignment="Center" HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="Collapsed"/>
    </Grid>
   </DockPanel>
   </Grid>
@@ -145,7 +177,10 @@ if (Test-Path $tokenPath) {
 '@
 $window = [Windows.Markup.XamlReader]::Load((New-Object Xml.XmlNodeReader $xaml))
 $ui = @{}
-'Header','ClockSurface','Clock','DisplayOptions','Appearance','Settings','Pin','Refresh','Close','DateNavigation','Previous','Day','Next','ViewToggle','Input','Status','Tasks','ListView','CalendarView','CalendarDays','NoViewsHint','ResizeHandle','WidgetFrame','BackgroundLayer','BackgroundFill','WallpaperOverlay' | ForEach-Object { $ui[$_] = $window.FindName($_) }
+'Header','ClockSurface','Clock','MenuButton','Pin','Refresh','Close','DateNavigation','Previous','Day','Next','ViewToggle','Input','Status','Tasks','ListView','CalendarView','CalendarDays','NoViewsHint','ResizeHandle','WidgetFrame','BackgroundLayer','BackgroundFill','WallpaperOverlay' | ForEach-Object { $ui[$_] = $window.FindName($_) }
+$ui.AppearanceMenuItem = $ui.MenuButton.ContextMenu.Items[0]
+$ui.DisplayMenuItem = $ui.MenuButton.ContextMenu.Items[1]
+$ui.SettingsMenuItem = $ui.MenuButton.ContextMenu.Items[2]
 $window.Width = $script:viewSizes.List.Width
 $window.Height = $script:viewSizes.List.Height
 function Save-WidgetPosition {
@@ -907,9 +942,15 @@ $dragWidget = {
 }
 $ui.Header.Add_PreviewMouseLeftButtonDown($dragWidget)
 $ui.ClockSurface.Add_PreviewMouseLeftButtonDown($dragWidget)
-$ui.DisplayOptions.Add_Click({ Configure-Display })
-$ui.Settings.Add_Click({ Configure })
-$ui.Appearance.Add_Click({ Configure-Theme })
+$ui.MenuButton.Add_Click({
+    $menu = $ui.MenuButton.ContextMenu
+    $menu.PlacementTarget = $ui.MenuButton
+    $menu.Placement = [Windows.Controls.Primitives.PlacementMode]::Bottom
+    $menu.IsOpen = !$menu.IsOpen
+})
+$ui.AppearanceMenuItem.Add_Click({ $ui.MenuButton.ContextMenu.IsOpen = $false; Configure-Theme })
+$ui.DisplayMenuItem.Add_Click({ $ui.MenuButton.ContextMenu.IsOpen = $false; Configure-Display })
+$ui.SettingsMenuItem.Add_Click({ $ui.MenuButton.ContextMenu.IsOpen = $false; Configure })
 $ui.Pin.Add_Click({ $window.Topmost = !$window.Topmost; $ui.Pin.Opacity = $(if ($window.Topmost) {1} else {0.45}) })
 $ui.Close.Add_Click({ $window.Close() })
 $ui.Refresh.Add_Click({ Load-Tasks })

@@ -8,7 +8,8 @@ function Assert-Equal($Actual, $Expected, [string]$Message) {
     if ($Actual -cne $Expected) { throw "$Message (expected $Expected; got $Actual)" }
 }
 function Click($Control) {
-    $Control.RaiseEvent([Windows.RoutedEventArgs]::new([Windows.Controls.Primitives.ButtonBase]::ClickEvent))
+    $event = $(if ($Control -is [Windows.Controls.MenuItem]) { [Windows.Controls.MenuItem]::ClickEvent } else { [Windows.Controls.Primitives.ButtonBase]::ClickEvent })
+    $Control.RaiseEvent([Windows.RoutedEventArgs]::new($event))
 }
 function Set-Check($Check, [bool]$Enabled) {
     $Check.IsChecked = $Enabled
@@ -38,7 +39,7 @@ function Test-DisplayDialog([string]$Phase) {
                 Set-Check $clock $false
                 Assert-Equal $ui.ClockSurface.Visibility ([Windows.Visibility]::Collapsed) 'Clock can be hidden'
                 Assert-Equal $clockTimer.IsEnabled $false 'Hidden clock stops timer'
-                Assert-Equal $ui.DisplayOptions.Visibility ([Windows.Visibility]::Visible) 'Display options remain accessible'
+                Assert-Equal $ui.MenuButton.Visibility ([Windows.Visibility]::Visible) 'Menu remains accessible'
 
                 Set-Check $calendar $false
                 Assert-Equal $script:viewMode 'List' 'List stays active if calendar is disabled'
@@ -54,7 +55,7 @@ function Test-DisplayDialog([string]$Phase) {
                 Assert-Equal $ui.Status.Visibility ([Windows.Visibility]::Collapsed) 'Compact view hides task status'
                 Assert-Equal $ui.NoViewsHint.Visibility ([Windows.Visibility]::Visible) 'Compact view offers recovery hint'
                 Assert-Equal $window.Height 140.0 'Compact view has its own size'
-                Assert-Equal $ui.Settings.Visibility ([Windows.Visibility]::Visible) 'Settings remain accessible'
+                Assert-Equal $ui.SettingsMenuItem.IsEnabled $true 'Settings remain accessible in the menu'
 
                 Set-Check $clock $true
                 Assert-Equal $ui.ClockSurface.Visibility ([Windows.Visibility]::Visible) 'Clock can be restored independently'
@@ -86,7 +87,12 @@ function Test-DisplayDialog([string]$Phase) {
         }
     })
     $probe.Start()
-    try { Click $ui.DisplayOptions } finally { $probe.Stop() }
+    try {
+        Click $ui.MenuButton
+        Assert-Equal $ui.MenuButton.ContextMenu.IsOpen $true 'Menu opens from the header'
+        Click $ui.DisplayMenuItem
+        Assert-Equal $ui.MenuButton.ContextMenu.IsOpen $false 'Menu closes before displaying the dialog'
+    } finally { $probe.Stop() }
     if ($script:dialogProbe.Error) { throw $script:dialogProbe.Error }
     if (!$script:dialogProbe.Finished) { throw 'Display dialog probe did not complete.' }
 }
@@ -114,6 +120,7 @@ try {
     $window.Show()
     $window.UpdateLayout()
 
+    Assert-Equal (@($ui.MenuButton.ContextMenu.Items | ForEach-Object { $_.Header }) -join ',') '外观,显示内容,设置' 'Menu entries and order'
     Test-DisplayDialog 'all-off'
     $window.Close()
     Invoke-Expression $source
@@ -139,7 +146,7 @@ try {
     Assert-Equal $script:viewMode 'Calendar' 'Calendar date cannot open a disabled list'
     Assert-Equal (Read-DisplaySettings -Path $displaySettingsPath).ShowList $false 'Final calendar-only choice persists'
     $window.Close()
-    'PASS: visible display button, independent clock/calendar/list toggles, compact view, recovery, persistence, and guarded calendar clicks.'
+    'PASS: themed settings menu, independent clock/calendar/list toggles, compact view, recovery, persistence, and guarded calendar clicks.'
 } finally {
     if ($window -and $window.IsVisible) { $window.Close() }
     $resolved = [IO.Path]::GetFullPath($fixture)
