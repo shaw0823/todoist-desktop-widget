@@ -26,7 +26,7 @@ $script:wallpaperCache = $null
 $script:token = ''
 $script:date = [DateTime]::Today
 $script:viewMode = 'List'
-$script:viewSizes = @{ List = @{Width=400.0; Height=460.0}; Calendar = @{Width=780.0; Height=720.0} }
+$script:viewSizes = @{ List = @{Width=400.0; Height=460.0}; Calendar = @{Width=780.0; Height=780.0} }
 $script:storedWindowPosition = Read-WindowPosition -Path $windowPositionPath
 if ($null -ne $script:storedWindowPosition) {
     foreach ($mode in @($script:viewSizes.Keys)) {
@@ -109,9 +109,11 @@ if (Test-Path $tokenPath) {
     <Grid x:Name="Header" Background="#01000000" MinHeight="30" Cursor="SizeAll" ToolTip="拖动标题或顶部空白处移动组件" Margin="0,0,0,8">
      <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
      <TextBlock Text="☀ Todoist" FontWeight="Bold" VerticalAlignment="Center"/>
-     <TextBlock x:Name="Clock" Grid.Column="1" Margin="7,0,3,0" HorizontalAlignment="Right" VerticalAlignment="Center" FontSize="12" Foreground="{DynamicResource WidgetMuted}"/>
      <StackPanel Grid.Column="2" Orientation="Horizontal"><Button x:Name="Appearance" Content="◐" ToolTip="颜色、壁纸和透明度"/><Button x:Name="Settings" Content="⚙" ToolTip="连接、启动和时钟设置"/><Button x:Name="Pin" Content="📌" ToolTip="切换置顶" Background="{DynamicResource WidgetAccent}" Foreground="{DynamicResource WidgetBackground}"/><Button x:Name="Refresh" Content="↻" ToolTip="刷新"/><Button x:Name="Close" Content="×" ToolTip="关闭"/></StackPanel>
     </Grid>
+    <Border x:Name="ClockSurface" HorizontalAlignment="Center" Background="{DynamicResource WidgetSurface}" BorderBrush="{DynamicResource WidgetControlBorder}" BorderThickness="1" CornerRadius="8" Padding="16,4" Margin="0,0,0,8" Cursor="SizeAll" ToolTip="拖动时钟移动组件">
+     <TextBlock x:Name="Clock" FontFamily="Segoe UI Variable Display, Segoe UI" FontWeight="SemiBold" FontSize="22" Typography.NumeralAlignment="Tabular" TextAlignment="Center" Foreground="{DynamicResource WidgetForeground}"/>
+    </Border>
     <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,0,0,8"><Button x:Name="Previous" Content="‹"/><Button x:Name="Day" Content="今天"/><Button x:Name="Next" Content="›"/><Button x:Name="ViewToggle" Content="月历" ToolTip="切换到完整月历" Margin="10,2,2,2"/></StackPanel>
     <TextBox x:Name="Input" Background="{DynamicResource WidgetSurface}" Foreground="{DynamicResource WidgetForeground}" CaretBrush="{DynamicResource WidgetForeground}" BorderBrush="{DynamicResource WidgetControlBorder}" BorderThickness="1.5" Padding="9" Margin="0,0,0,8" ToolTip="输入任务内容，回车添加到当前日期"/>
    </StackPanel>
@@ -139,7 +141,7 @@ if (Test-Path $tokenPath) {
 '@
 $window = [Windows.Markup.XamlReader]::Load((New-Object Xml.XmlNodeReader $xaml))
 $ui = @{}
-'Header','Clock','Appearance','Settings','Pin','Refresh','Close','Previous','Day','Next','ViewToggle','Input','Status','Tasks','ListView','CalendarView','CalendarDays','ResizeHandle','WidgetFrame','BackgroundLayer','BackgroundFill','WallpaperOverlay' | ForEach-Object { $ui[$_] = $window.FindName($_) }
+'Header','ClockSurface','Clock','Appearance','Settings','Pin','Refresh','Close','Previous','Day','Next','ViewToggle','Input','Status','Tasks','ListView','CalendarView','CalendarDays','ResizeHandle','WidgetFrame','BackgroundLayer','BackgroundFill','WallpaperOverlay' | ForEach-Object { $ui[$_] = $window.FindName($_) }
 $window.Width = $script:viewSizes.List.Width
 $window.Height = $script:viewSizes.List.Height
 function Save-WidgetPosition {
@@ -795,7 +797,7 @@ function Test-HeaderDragSource($source) {
     $node = $source
     while ($null -ne $node) {
         if ($node -is [Windows.Controls.Primitives.ButtonBase]) { return $false }
-        if ($node -eq $ui.Header) { return $true }
+        if ($node -eq $ui.Header -or $node -eq $ui.ClockSurface) { return $true }
         if ($node -is [Windows.Media.Visual] -or $node -is [Windows.Media.Media3D.Visual3D]) {
             $node = [Windows.Media.VisualTreeHelper]::GetParent($node)
         } elseif ($node -is [Windows.FrameworkContentElement]) {
@@ -806,12 +808,14 @@ function Test-HeaderDragSource($source) {
     }
     return $false
 }
-$ui.Header.Add_PreviewMouseLeftButtonDown({
+$dragWidget = {
     if ($_.LeftButton -eq [Windows.Input.MouseButtonState]::Pressed -and (Test-HeaderDragSource $_.OriginalSource)) {
         $_.Handled = $true
         $window.DragMove()
     }
-})
+}
+$ui.Header.Add_PreviewMouseLeftButtonDown($dragWidget)
+$ui.ClockSurface.Add_PreviewMouseLeftButtonDown($dragWidget)
 $ui.Settings.Add_Click({ Configure })
 $ui.Appearance.Add_Click({ Configure-Theme })
 $ui.Pin.Add_Click({ $window.Topmost = !$window.Topmost; $ui.Pin.Opacity = $(if ($window.Topmost) {1} else {0.45}) })

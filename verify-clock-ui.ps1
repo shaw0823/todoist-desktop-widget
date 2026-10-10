@@ -25,14 +25,20 @@ function Test-HeaderLayout([double]$Width, [string]$Format) {
     $ui.Clock.Text = Format-WidgetClock -DateTime ([DateTime]::new(2026, 10, 10, 13, 59, 59)) -Format $Format
     $window.UpdateLayout()
     $title = Get-HeaderBounds $ui.Header.Children[0]
-    $clock = Get-HeaderBounds $ui.Clock
     $buttons = Get-HeaderBounds $ui.Appearance.Parent
-    if ($title.Right -gt $clock.Left + 1 -or $clock.Right -gt $buttons.Left + 1 -or $buttons.Right -gt $ui.Header.ActualWidth + 1) {
+    if ($title.Right -gt $buttons.Left + 1 -or $buttons.Right -gt $ui.Header.ActualWidth + 1) {
         throw "Header controls overlap or overflow at $Width px in $Format format."
     }
-    if ($ui.Clock.ActualWidth + $ui.Clock.Margin.Left + $ui.Clock.Margin.Right + 1 -lt $ui.Clock.DesiredSize.Width) {
-        throw "Clock text is clipped at $Width px in $Format format (actual $($ui.Clock.ActualWidth), desired $($ui.Clock.DesiredSize.Width), title $($title.Right), clock $($clock.Left)..$($clock.Right), buttons $($buttons.Left)..$($buttons.Right), header $($ui.Header.ActualWidth))."
+    $clockOrigin = $ui.ClockSurface.TranslatePoint([Windows.Point]::new(0, 0), $ui.Header.Parent)
+    if ($clockOrigin.X -lt -1 -or $clockOrigin.X + $ui.ClockSurface.ActualWidth -gt $ui.Header.ActualWidth + 1) {
+        throw "Clock surface overflows at $Width px in $Format format."
     }
+    if ($ui.Clock.ActualWidth + 1 -lt $ui.Clock.DesiredSize.Width) {
+        throw "Clock text is clipped at $Width px in $Format format (actual $($ui.Clock.ActualWidth), desired $($ui.Clock.DesiredSize.Width))."
+    }
+    if ($ui.Clock.FontSize -le $ui.ViewToggle.FontSize) { throw 'Clock must be larger than the view button labels.' }
+    if ($ui.Clock.FontWeight -lt [Windows.FontWeights]::SemiBold) { throw 'Clock font weight is too light.' }
+    if ($ui.ClockSurface.Background.Opacity -lt 0.9) { throw 'Clock surface is too transparent to read over a wallpaper.' }
 }
 function Test-ClockSettingsDialog([int]$ExpectedIndex, [int]$NewIndex) {
     $script:clockDialogState = @{ Expected = $ExpectedIndex; New = $NewIndex; Completed = $false; Failure = $null }
@@ -98,6 +104,10 @@ try {
     Test-HeaderLayout 400 '12h'
     Test-HeaderLayout 340 '24h'
     Test-HeaderLayout 340 '12h'
+    if (!(Test-HeaderDragSource $ui.Clock)) { throw 'Clock surface cannot be used to move the widget.' }
+    if (Test-HeaderDragSource $ui.Settings) { throw 'Settings button was mistaken for a drag handle.' }
+    Apply-Background @{ Mode='Color'; ImagePath=''; Opacity=0.0; Overlay=0.5 }
+    Test-HeaderLayout 340 '12h'
     $window.Width = 400
     Update-ClockDisplay
 
@@ -111,7 +121,7 @@ try {
     Assert-Equal (Read-ClockSettings -Path $clockSettingsPath).Format '24h' 'Last selection survives settings reopening'
     $window.Close()
     Assert-Equal $clockTimer.IsEnabled $false 'Closing the widget stops the clock timer'
-    'PASS: live header clock, 340/400 px layout, immediate 12/24-hour switch, and local persistence.'
+    'PASS: readable large clock, 340/400 px layout, transparent background, immediate 12/24-hour switch, and local persistence.'
 } finally {
     if ($window -and $window.IsVisible) { $window.Close() }
     $resolved = [IO.Path]::GetFullPath($fixture)

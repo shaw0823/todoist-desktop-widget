@@ -150,7 +150,7 @@ try {
     if ($footerOrigin.Y -lt -0.1 -or $footerOrigin.Y + $cellState.More.ActualHeight -gt $content.ActualHeight + 0.1) {
         throw 'Overflow footer is clipped outside the resized calendar cell.'
     }
-    $window.Height = 720
+    $window.Height = 780
     $window.UpdateLayout()
     Assert-Equal @($cellState.Preview.Children | Where-Object { $_.Visibility -eq [Windows.Visibility]::Visible }).Count 3 'Expanded calendar restores three task previews'
     Assert-Equal $cellState.More.Text '另有 1 项' 'Expanded calendar restores ordinary overflow count'
