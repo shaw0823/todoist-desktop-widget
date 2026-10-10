@@ -6,6 +6,9 @@ token*
 credentials*
 theme.json
 background.json
+window-position.json
+.window-position-test-*/
+.window-position-ui-test-*/
 *.tmp
 .theme-ui-test-*/
 .background-test-*/

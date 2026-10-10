@@ -12,6 +12,9 @@ $tokenPath = Join-Path $dataDir 'token.dat'
 . (Join-Path $PSScriptRoot 'Background.ps1')
 . (Join-Path $PSScriptRoot 'Calendar.ps1')
 . (Join-Path $PSScriptRoot 'FollowSettings.ps1')
+. (Join-Path $PSScriptRoot 'WindowPosition.ps1')
+$windowPositionPath = Join-Path $dataDir 'window-position.json'
+$script:positionReady = $false
 $themePath = Join-Path $dataDir 'theme.json'
 $script:theme = Read-Theme $themePath
 $backgroundPath = Join-Path $dataDir 'background.json'
@@ -21,6 +24,14 @@ $script:token = ''
 $script:date = [DateTime]::Today
 $script:viewMode = 'List'
 $script:viewSizes = @{ List = @{Width=400.0; Height=460.0}; Calendar = @{Width=780.0; Height=720.0} }
+$script:storedWindowPosition = Read-WindowPosition -Path $windowPositionPath
+if ($null -ne $script:storedWindowPosition) {
+    foreach ($mode in @($script:viewSizes.Keys)) {
+        if ($script:storedWindowPosition.Views.ContainsKey($mode)) {
+            $script:viewSizes[$mode] = $script:storedWindowPosition.Views[$mode]
+        }
+    }
+}
 $script:busy = $false
 $script:jobs = [Collections.Generic.List[object]]::new()
 $script:pending = @{}
@@ -125,6 +136,56 @@ if (Test-Path $tokenPath) {
 $window = [Windows.Markup.XamlReader]::Load((New-Object Xml.XmlNodeReader $xaml))
 $ui = @{}
 'Header','Appearance','Settings','Pin','Refresh','Close','Previous','Day','Next','ViewToggle','Input','Status','Tasks','ListView','CalendarView','CalendarDays','ResizeHandle','WidgetFrame','BackgroundLayer','BackgroundFill','WallpaperOverlay' | ForEach-Object { $ui[$_] = $window.FindName($_) }
+$window.Width = $script:viewSizes.List.Width
+$window.Height = $script:viewSizes.List.Height
+function Save-WidgetPosition {
+    if (!$script:positionReady -or $window.WindowState -ne [Windows.WindowState]::Normal) { return }
+    try {
+        $handle = [Windows.Interop.WindowInteropHelper]::new($window).Handle
+        $bounds = [TodoistWidget.NativeWindow]::GetWidgetBounds($handle)
+        if ($bounds[2] -gt 0 -and $bounds[3] -gt 0) {
+            $script:viewSizes[$script:viewMode] = @{ Width=$window.Width; Height=$window.Height }
+            $views = @{}
+            $previous = Read-WindowPosition -Path $windowPositionPath
+            if ($null -ne $previous) {
+                foreach ($mode in @($previous.Views.Keys)) { $views[$mode] = $previous.Views[$mode] }
+            }
+            foreach ($mode in @($script:viewSizes.Keys)) { $views[$mode] = $script:viewSizes[$mode] }
+            Save-WindowPosition -Position @{Left=$bounds[0]; Top=$bounds[1]; Views=$views} -Path $windowPositionPath
+        }
+    } catch {
+        # Position preferences must not interrupt task editing; a later move retries.
+    }
+}
+function Restore-WidgetPosition {
+    $position = $script:storedWindowPosition
+    if ($null -eq $position) { return }
+    try {
+        Add-Type -AssemblyName System.Windows.Forms
+        $handle = [Windows.Interop.WindowInteropHelper]::new($window).Handle
+        $bounds = [TodoistWidget.NativeWindow]::GetWidgetBounds($handle)
+        # Both native bounds and screen work areas use the process's screen coordinates.
+        $areas = @([Windows.Forms.Screen]::AllScreens | ForEach-Object { $_.WorkingArea })
+        $visible = Get-VisibleWindowPosition -Left $position.Left -Top $position.Top -Width $bounds[2] -Height $bounds[3] -WorkingAreas $areas
+        $area = @($areas | Where-Object {
+            $visible.Left -ge $_.Left -and $visible.Left -lt $_.Right -and
+            $visible.Top -ge $_.Top -and $visible.Top -lt $_.Bottom
+        } | Select-Object -First 1)
+        if ($area.Count) {
+            $scaleX = $bounds[2] / $window.Width
+            $scaleY = $bounds[3] / $window.Height
+            if ($scaleX -gt 0 -and $scaleY -gt 0) {
+                $window.Width = [Math]::Max($window.MinWidth, [Math]::Min($window.Width, $area[0].Width / $scaleX))
+                $window.Height = [Math]::Max($window.MinHeight, [Math]::Min($window.Height, $area[0].Height / $scaleY))
+                $bounds = [TodoistWidget.NativeWindow]::GetWidgetBounds($handle)
+                $visible = Get-VisibleWindowPosition -Left $position.Left -Top $position.Top -Width $bounds[2] -Height $bounds[3] -WorkingAreas $areas
+            }
+        }
+        [TodoistWidget.NativeWindow]::MoveWidget($handle, $visible.Left, $visible.Top)
+    } catch {
+        # Missing displays or unreadable preferences fall back to Windows placement.
+    }
+}
 function Get-WallpaperBitmap([string]$path) {
     $file = Get-Item -LiteralPath $path -ErrorAction Stop
     if ($file.PSIsContainer -or $file.Length -gt 50MB) { throw '请选择小于 50 MB 的图片文件。' }
@@ -803,7 +864,26 @@ $poll.Start()
 $timer=New-Object Windows.Threading.DispatcherTimer
 $timer.Interval=[TimeSpan]::FromMinutes(1); $timer.Add_Tick({ Load-Tasks }); $timer.Start()
 $window.Add_ContentRendered({ Load-Tasks })
+$positionSaveTimer = [Windows.Threading.DispatcherTimer]::new()
+$positionSaveTimer.Interval = [TimeSpan]::FromMilliseconds(400)
+$positionSaveTimer.Add_Tick({ $this.Stop(); Save-WidgetPosition })
+$window.Add_Loaded({ Restore-WidgetPosition; $script:positionReady = $true })
+$window.Add_LocationChanged({
+    if ($script:positionReady -and $window.WindowState -eq [Windows.WindowState]::Normal) {
+        $positionSaveTimer.Stop()
+        $positionSaveTimer.Start()
+    }
+})
+$window.Add_SizeChanged({
+    if ($script:positionReady -and $window.WindowState -eq [Windows.WindowState]::Normal) {
+        $positionSaveTimer.Stop()
+        $positionSaveTimer.Start()
+    }
+})
+$window.Add_Closing({ $positionSaveTimer.Stop(); Save-WidgetPosition })
 $window.Add_Closed({
+    $positionSaveTimer.Stop()
+    $script:positionReady = $false
     $timer.Stop(); $poll.Stop()
     foreach ($job in $script:jobs) { if ($job.Worker) { $job.Worker.Stop(); $job.Worker.Dispose() } }
 })

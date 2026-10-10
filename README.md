@@ -80,6 +80,12 @@ todoist widge 是一个基于 Todoist 官方 API 的第三方独立 Windows 任�
 
 网络请求在后台执行，不阻塞界面；无网络时保留已有列表并显示错误。
 
+## 记住窗口位置
+
+拖动或调整组件大小后会自动保存；下次打开会恢复上次的位置和列表、月历各自的窗口大小，无需设置。关闭窗口时也会再保存一次。重新打开时，如果显示器已断开或分辨率改变，窗口会自动放到当前屏幕的可见工作区。
+
+位置和大小只保存在本机 `%LOCALAPPDATA%\TodoistDesktopWidget\window-position.json`，不会上传到 GitHub。
+
 ## 当前限制
 
 - 应用采用无系统边框的悬浮窗口，未嵌入桌面背景层。
@@ -100,6 +106,8 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\verify-calendar.ps1
 powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File .\verify-calendar-ui.ps1
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\verify-follow-settings.ps1
 powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File .\verify-follow-settings-ui.ps1
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\verify-window-position.ps1
+powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File .\verify-window-position-ui.ps1
 ```
 
 测试使用模拟网络响应和进程状态，不读取真实 API Token，也不会调用 Todoist API。动画测试会短暂显示一个测试窗口。

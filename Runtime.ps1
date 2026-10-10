@@ -36,8 +36,21 @@ namespace TodoistWidget {
         private static extern int GetWindowLong(IntPtr window, int index);
         [StructLayout(LayoutKind.Sequential)]
         private struct Rectangle { public int Left, Top, Right, Bottom; }
-        [DllImport("user32.dll")]
+        [DllImport("user32.dll", SetLastError = true)]
         private static extern bool GetWindowRect(IntPtr window, out Rectangle rectangle);
+        [DllImport("user32.dll", SetLastError = true)]
+        private static extern bool SetWindowPos(IntPtr window, IntPtr insertAfter, int x, int y, int width, int height, uint flags);
+        public static int[] GetWidgetBounds(IntPtr window) {
+            Rectangle rectangle;
+            if (window == IntPtr.Zero || !GetWindowRect(window, out rectangle))
+                throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
+            return new int[] { rectangle.Left, rectangle.Top, rectangle.Right - rectangle.Left, rectangle.Bottom - rectangle.Top };
+        }
+        public static void MoveWidget(IntPtr window, int left, int top) {
+            // Keep the existing size, z-order and activation state.
+            if (!SetWindowPos(window, IntPtr.Zero, left, top, 0, 0, 0x0015))
+                throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
+        }
         [DllImport("dwmapi.dll")]
         private static extern int DwmGetWindowAttribute(IntPtr window, uint attribute, out int value, int size);
         public static TodoistWindowState GetMainWindowState(uint[] processIds) {

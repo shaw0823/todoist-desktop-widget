@@ -53,7 +53,7 @@ function Assert-NoRequestsSince([int]$Count, [string]$Message) {
 
 try {
     $source = [IO.File]::ReadAllText((Join-Path $PSScriptRoot 'Start.ps1'))
-    foreach ($module in 'Runtime.ps1', 'Theme.ps1', 'Background.ps1', 'Calendar.ps1', 'FollowSettings.ps1') {
+    foreach ($module in 'Runtime.ps1', 'Theme.ps1', 'Background.ps1', 'Calendar.ps1', 'FollowSettings.ps1','WindowPosition.ps1') {
         $modulePath = (Join-Path $PSScriptRoot $module).Replace("'", "''")
         $source = $source.Replace(". (Join-Path `$PSScriptRoot '$module')", ". '$modulePath'")
     }
@@ -61,11 +61,15 @@ try {
     $source = $source.Replace('if (Test-WidgetOpen) { return }', '')
     $realDataAssignment = "`$dataDir = Join-Path `$env:LOCALAPPDATA 'TodoistDesktopWidget'"
     if (!$source.Contains($realDataAssignment)) { throw 'Cannot isolate widget settings directory.' }
-    $source = $source.Replace($realDataAssignment, '$dataDir = $testDirectory')
+    $fixtureDataPath = $testDirectory.Replace("'", "''")
+    $fixtureTokenPath = (Join-Path $testDirectory 'token.dat').Replace("'", "''")
+    $source = $source.Replace($realDataAssignment, "`$dataDir = '$fixtureDataPath'")
+    $source = $source.Replace("`$tokenPath = Join-Path `$dataDir 'token.dat'", "`$tokenPath = '$fixtureTokenPath'")
     $source = $source.Replace('Todoist 桌面小组件', 'Todoist 日历测试')
     $source = $source.Replace('$window.ShowDialog() | Out-Null', '$timer.Stop(); $poll.Stop()')
     Invoke-Expression $source
     Assert-Equal $dataDir $testDirectory 'Fixture uses isolated settings directory'
+    Assert-Equal $tokenPath (Join-Path $testDirectory 'token.dat') 'Fixture uses isolated token path'
     Assert-Equal $script:token '' 'Fixture never reads the real Todoist token'
 
     # The background worker serializes this function; it cannot access real APIs.
