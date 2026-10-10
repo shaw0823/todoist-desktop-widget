@@ -30,7 +30,8 @@ function Test-DisplayDialog([string]$Phase) {
             $clock = $dialog.FindName('ShowClock')
             $calendar = $dialog.FindName('ShowCalendar')
             $list = $dialog.FindName('ShowList')
-            if (!$clock -or !$calendar -or !$list) { throw 'Display controls are missing.' }
+            $clockFormat = $dialog.FindName('ClockFormat')
+            if (!$clock -or !$calendar -or !$list -or !$clockFormat) { throw 'Display controls are missing.' }
             if ($script:dialogProbe.Phase -eq 'all-off') {
                 Assert-Equal ([bool]$clock.IsChecked) $true 'Clock defaults on'
                 Assert-Equal ([bool]$calendar.IsChecked) $true 'Calendar defaults on'
@@ -40,6 +41,9 @@ function Test-DisplayDialog([string]$Phase) {
                 Assert-Equal $ui.ClockSurface.Visibility ([Windows.Visibility]::Collapsed) 'Clock can be hidden'
                 Assert-Equal $clockTimer.IsEnabled $false 'Hidden clock stops timer'
                 Assert-Equal $ui.MenuButton.Visibility ([Windows.Visibility]::Visible) 'Menu remains accessible'
+                Assert-Equal $clockFormat.IsEnabled $true 'Clock format remains available while the clock is hidden'
+                $clockFormat.SelectedIndex = 1
+                Assert-Equal (Read-ClockSettings -Path $clockSettingsPath).Format '12h' 'Hidden clock format selection persists'
 
                 Set-Check $calendar $false
                 Assert-Equal $script:viewMode 'List' 'List stays active if calendar is disabled'
@@ -55,17 +59,19 @@ function Test-DisplayDialog([string]$Phase) {
                 Assert-Equal $ui.Status.Visibility ([Windows.Visibility]::Collapsed) 'Compact view hides task status'
                 Assert-Equal $ui.NoViewsHint.Visibility ([Windows.Visibility]::Visible) 'Compact view offers recovery hint'
                 Assert-Equal $window.Height 140.0 'Compact view has its own size'
-                Assert-Equal $ui.SettingsMenuItem.IsEnabled $true 'Settings remain accessible in the menu'
+                Assert-Equal $ui.SettingsMenuItem.IsEnabled $true 'Todoist association remains accessible in the menu'
 
                 Set-Check $clock $true
                 Assert-Equal $ui.ClockSurface.Visibility ([Windows.Visibility]::Visible) 'Clock can be restored independently'
                 Assert-Equal $clockTimer.IsEnabled $true 'Restored clock resumes timer'
+                Assert-Equal $script:clockFormat '12h' 'Restored clock uses the selected time format'
                 $saved = Read-DisplaySettings -Path $displaySettingsPath
                 Assert-Equal $saved.ShowClock $true 'Clock toggle persists'
                 Assert-Equal $saved.ShowCalendar $false 'Calendar toggle persists'
                 Assert-Equal $saved.ShowList $false 'List toggle persists'
             } elseif ($script:dialogProbe.Phase -eq 'restore') {
                 Assert-Equal ([bool]$clock.IsChecked) $true 'Clock checkbox reloads'
+                Assert-Equal $clockFormat.SelectedIndex 1 'Clock format selection reloads'
                 Assert-Equal ([bool]$calendar.IsChecked) $false 'Calendar checkbox reloads'
                 Assert-Equal ([bool]$list.IsChecked) $false 'List checkbox reloads'
                 Set-Check $list $true
@@ -120,7 +126,7 @@ try {
     $window.Show()
     $window.UpdateLayout()
 
-    Assert-Equal (@($ui.MenuButton.ContextMenu.Items | ForEach-Object { $_.Header }) -join ',') '外观,显示内容,设置' 'Menu entries and order'
+    Assert-Equal (@($ui.MenuButton.ContextMenu.Items | ForEach-Object { $_.Header }) -join ',') '外观,显示内容,关联' 'Menu entries and order'
     Test-DisplayDialog 'all-off'
     $window.Close()
     Invoke-Expression $source

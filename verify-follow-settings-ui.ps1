@@ -45,13 +45,14 @@ function Test-FollowDialog([bool]$Initial, $Desired, [bool]$Fail = $false, [bool
     $testTimer.Add_Tick({
         $state = $this.Tag
         $state.Ticks++
-        $dialog = @($window.OwnedWindows | Where-Object { $_.Title -eq '设置' }) | Select-Object -First 1
+        $dialog = @($window.OwnedWindows | Where-Object { $_.Title -eq '关联' }) | Select-Object -First 1
         try {
             if ([DateTime]::UtcNow -gt $state.Deadline) { throw 'Settings dialog operation timed out.' }
             if (!$dialog) { return }
             $toggle = $dialog.FindName('FollowStartup')
             $status = $dialog.FindName('FollowStatus')
             if (!$toggle -or !$status) { throw 'Follow controls are missing from settings.' }
+            if ($dialog.FindName('ClockFormat')) { throw 'Clock format belongs in display settings, not Todoist association.' }
             switch ($state.Stage) {
                 'Open' {
                     if ($state.ReopenPending) {

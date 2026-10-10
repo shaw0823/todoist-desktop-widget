@@ -40,23 +40,23 @@ function Test-HeaderLayout([double]$Width, [string]$Format) {
     if ($ui.Clock.FontWeight -lt [Windows.FontWeights]::SemiBold) { throw 'Clock font weight is too light.' }
     if ($ui.ClockSurface.Background.Opacity -lt 0.9) { throw 'Clock surface is too transparent to read over a wallpaper.' }
 }
-function Test-ClockSettingsDialog([int]$ExpectedIndex, [int]$NewIndex) {
+function Test-ClockFormatDialog([int]$ExpectedIndex, [int]$NewIndex) {
     $script:clockDialogState = @{ Expected = $ExpectedIndex; New = $NewIndex; Completed = $false; Failure = $null }
     $probe = [Windows.Threading.DispatcherTimer]::new()
     $probe.Interval = [TimeSpan]::FromMilliseconds(30)
     $probe.Add_Tick({
-        $dialog = @($window.OwnedWindows | Where-Object { $_.Title -eq '设置' }) | Select-Object -First 1
+        $dialog = @($window.OwnedWindows | Where-Object { $_.Title -eq '显示内容' }) | Select-Object -First 1
         if (!$dialog) { return }
         try {
             $choice = $dialog.FindName('ClockFormat')
             if (!$choice) { throw 'Clock format selector is missing.' }
-            Assert-Equal $choice.SelectedIndex $script:clockDialogState.Expected 'Settings loads the saved clock format'
+            Assert-Equal $choice.SelectedIndex $script:clockDialogState.Expected 'Display dialog loads the saved clock format'
             if ($script:clockDialogState.New -ge 0) {
                 $choice.SelectedIndex = $script:clockDialogState.New
                 $expectedFormat = $(if ($script:clockDialogState.New -eq 1) { '12h' } else { '24h' })
                 Assert-Equal $script:clockFormat $expectedFormat 'Clock format switches immediately'
                 Assert-Equal (Read-ClockSettings -Path $clockSettingsPath).Format $expectedFormat 'Clock format persists locally'
-                Assert-Equal $ui.Clock.Text (Format-WidgetClock -DateTime ([DateTime]::Now) -Format $expectedFormat) 'Header clock switches immediately'
+                Assert-Equal $ui.Clock.Text (Format-WidgetClock -DateTime ([DateTime]::Now) -Format $expectedFormat) 'Visible clock switches immediately'
             }
             $script:clockDialogState.Completed = $true
         } catch {
@@ -67,9 +67,9 @@ function Test-ClockSettingsDialog([int]$ExpectedIndex, [int]$NewIndex) {
         }
     })
     $probe.Start()
-    try { Configure } finally { $probe.Stop() }
+    try { Configure-Display } finally { $probe.Stop() }
     if ($script:clockDialogState.Failure) { throw $script:clockDialogState.Failure }
-    if (!$script:clockDialogState.Completed) { throw 'Clock settings dialog did not finish.' }
+    if (!$script:clockDialogState.Completed) { throw 'Clock format dialog did not finish.' }
 }
 
 try {
@@ -118,9 +118,9 @@ try {
     $window.Width = 400
     Update-ClockDisplay
 
-    Test-ClockSettingsDialog 0 1
-    Test-ClockSettingsDialog 1 -1
-    Test-ClockSettingsDialog 1 0
+    Test-ClockFormatDialog 0 1
+    Test-ClockFormatDialog 1 -1
+    Test-ClockFormatDialog 1 0
     $first = $ui.Clock.Text
     $clockTimer.Start()
     Pump-Dispatcher 1400

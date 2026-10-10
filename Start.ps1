@@ -113,7 +113,7 @@ if (Test-Path $tokenPath) {
      <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
      <TextBlock Text="☀ Todoist" FontWeight="Bold" VerticalAlignment="Center"/>
      <StackPanel Grid.Column="2" Orientation="Horizontal">
-      <Button x:Name="MenuButton" Content="⚙" ToolTip="菜单：外观、显示内容和设置" AutomationProperties.Name="菜单">
+      <Button x:Name="MenuButton" Content="⚙" ToolTip="菜单：外观、显示内容和关联" AutomationProperties.Name="菜单">
        <Button.ContextMenu>
         <ContextMenu Background="{DynamicResource WidgetSurface}" BorderBrush="{DynamicResource WidgetControlBorder}" BorderThickness="1" Padding="4">
          <ContextMenu.Resources>
@@ -136,8 +136,8 @@ if (Test-Path $tokenPath) {
           </Style>
          </ContextMenu.Resources>
          <MenuItem x:Name="AppearanceMenuItem" Header="外观" ToolTip="颜色、壁纸和透明度"/>
-         <MenuItem x:Name="DisplayMenuItem" Header="显示内容" ToolTip="时间、月历和列表开关"/>
-         <MenuItem x:Name="SettingsMenuItem" Header="设置" ToolTip="连接、启动和时钟设置"/>
+         <MenuItem x:Name="DisplayMenuItem" Header="显示内容" ToolTip="时间及格式、月历和列表开关"/>
+         <MenuItem x:Name="SettingsMenuItem" Header="关联" ToolTip="Todoist 连接与启动联动"/>
         </ContextMenu>
        </Button.ContextMenu>
       </Button>
@@ -583,6 +583,16 @@ function Configure-Display {
   <CheckBox x:Name="ShowClock" Content="时间" FontSize="14" Margin="0,0,0,12"/>
   <CheckBox x:Name="ShowCalendar" Content="月历" FontSize="14" Margin="0,0,0,12"/>
   <CheckBox x:Name="ShowList" Content="列表" FontSize="14" Margin="0,0,0,10"/>
+  <Border Background="#E9EEF0" CornerRadius="6" Padding="12" Margin="0,4,0,12">
+   <StackPanel>
+    <TextBlock Text="时间格式" FontSize="14" FontWeight="SemiBold" Margin="0,0,0,8"/>
+    <ComboBox x:Name="ClockFormat" HorizontalAlignment="Left" MinWidth="150" Padding="6,3">
+     <ComboBoxItem Content="24 小时制" Tag="24h"/>
+     <ComboBoxItem Content="12 小时制" Tag="12h"/>
+    </ComboBox>
+    <TextBlock x:Name="ClockFormatStatus" Foreground="#59636A" TextWrapping="Wrap" FontSize="11" Margin="0,6,0,0"/>
+   </StackPanel>
+  </Border>
   <TextBlock x:Name="DisplayStatus" Foreground="#59636A" FontSize="11" TextWrapping="Wrap"/>
   <Button x:Name="CloseDisplay" Content="关闭" IsCancel="True" HorizontalAlignment="Right" MinWidth="75" Padding="8,5" Margin="0,14,0,0"/>
  </StackPanel>
@@ -593,10 +603,14 @@ function Configure-Display {
     $clockCheck = $dialog.FindName('ShowClock')
     $calendarCheck = $dialog.FindName('ShowCalendar')
     $listCheck = $dialog.FindName('ShowList')
+    $clockChoice = $dialog.FindName('ClockFormat')
+    $clockStatus = $dialog.FindName('ClockFormatStatus')
     $message = $dialog.FindName('DisplayStatus')
     $clockCheck.IsChecked = $script:displaySettings.ShowClock
     $calendarCheck.IsChecked = $script:displaySettings.ShowCalendar
     $listCheck.IsChecked = $script:displaySettings.ShowList
+    $clockChoice.SelectedIndex = $(if ($script:clockFormat -eq '12h') { 1 } else { 0 })
+    $clockStatus.Text = '切换后立即保存，只影响顶部时间显示。'
     $message.Text = '月历和列表都关闭时，组件只显示标题和可选时间。'
     $toggleDisplay = {
         $candidate = @{
@@ -625,6 +639,22 @@ function Configure-Display {
     $clockCheck.Add_Click($toggleDisplay)
     $calendarCheck.Add_Click($toggleDisplay)
     $listCheck.Add_Click($toggleDisplay)
+    $clockChoice.Add_SelectionChanged({
+        if ($null -eq $this.SelectedItem) { return }
+        $desiredFormat = [string]$this.SelectedItem.Tag
+        if ($desiredFormat -eq $script:clockFormat) { return }
+        try {
+            Save-ClockSettings -Format $desiredFormat -Path $clockSettingsPath
+            $script:clockFormat = $desiredFormat
+            Update-ClockDisplay
+            $clockStatus.Foreground = [Windows.Media.Brushes]::DimGray
+            $clockStatus.Text = '时钟格式已保存。'
+        } catch {
+            $this.SelectedIndex = $(if ($script:clockFormat -eq '12h') { 1 } else { 0 })
+            $clockStatus.Foreground = [Windows.Media.Brushes]::Firebrick
+            $clockStatus.Text = '保存时钟格式失败，请重试。'
+        }
+    })
     $dialog.ShowDialog() | Out-Null
 }
 function Configure-Theme {
@@ -828,9 +858,9 @@ function Start-FollowUpdate([bool]$Enabled, $Context) {
 }
 function Configure {
     [xml]$settingsXaml = @'
-<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" Title="设置" Width="440" SizeToContent="Height" ResizeMode="NoResize" WindowStartupLocation="CenterOwner" Background="#F5F6F7">
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" Title="关联" Width="440" SizeToContent="Height" ResizeMode="NoResize" WindowStartupLocation="CenterOwner" Background="#F5F6F7">
  <StackPanel Margin="20">
-  <TextBlock Text="连接 Todoist" FontSize="18" FontWeight="SemiBold" Margin="0,0,0,8"/>
+  <TextBlock Text="关联 Todoist" FontSize="18" FontWeight="SemiBold" Margin="0,0,0,8"/>
   <TextBlock Text="设置 → 关联应用 → 开发者，复制 API Token。" TextWrapping="Wrap" Foreground="#59636A" Margin="0,0,0,10"/>
   <PasswordBox x:Name="ApiToken" Padding="7"/>
   <TextBlock Text="API Token 仅保存在这台电脑上。" Foreground="#59636A" FontSize="11" Margin="0,6,0,0"/>
@@ -842,16 +872,6 @@ function Configure {
     <CheckBox x:Name="FollowStartup" Content="打开 Todoist 时自动启动 Todoist Widget" FontSize="13"/>
     <TextBlock x:Name="FollowStatus" Foreground="#59636A" TextWrapping="Wrap" FontSize="11" Margin="20,6,0,0"/>
     <TextBlock Text="关闭 Todoist 后，本应用继续运行。也可以通过桌面快捷方式独立打开。" Foreground="#59636A" TextWrapping="Wrap" FontSize="11" Margin="0,12,0,0"/>
-   </StackPanel>
-  </Border>
-  <Border Background="#E9EEF0" CornerRadius="6" Padding="12" Margin="0,10,0,0">
-   <StackPanel>
-    <TextBlock Text="时钟" FontSize="14" FontWeight="SemiBold" Margin="0,0,0,8"/>
-    <ComboBox x:Name="ClockFormat" HorizontalAlignment="Left" MinWidth="150" Padding="6,3">
-     <ComboBoxItem Content="24 小时制" Tag="24h"/>
-     <ComboBoxItem Content="12 小时制" Tag="12h"/>
-    </ComboBox>
-    <TextBlock x:Name="ClockFormatStatus" Foreground="#59636A" TextWrapping="Wrap" FontSize="11" Margin="0,6,0,0"/>
    </StackPanel>
   </Border>
   <Button x:Name="CloseSettings" Content="关闭" IsCancel="True" HorizontalAlignment="Right" MinWidth="75" Padding="8,5" Margin="0,14,0,0"/>
@@ -895,26 +915,6 @@ function Configure {
             $state.Check.IsEnabled = $true
             $state.Message.Text = '修改失败，请重试。'
             $state.Message.Foreground = [Windows.Media.Brushes]::Firebrick
-        }
-    })
-    $clockChoice = $dialog.FindName('ClockFormat')
-    $clockStatus = $dialog.FindName('ClockFormatStatus')
-    $clockChoice.SelectedIndex = $(if ($script:clockFormat -eq '12h') { 1 } else { 0 })
-    $clockStatus.Text = '切换后立即保存，只影响顶部时间显示。'
-    $clockChoice.Add_SelectionChanged({
-        if ($null -eq $this.SelectedItem) { return }
-        $desiredFormat = [string]$this.SelectedItem.Tag
-        if ($desiredFormat -eq $script:clockFormat) { return }
-        try {
-            Save-ClockSettings -Format $desiredFormat -Path $clockSettingsPath
-            $script:clockFormat = $desiredFormat
-            Update-ClockDisplay
-            $clockStatus.Foreground = [Windows.Media.Brushes]::DimGray
-            $clockStatus.Text = '时钟格式已保存。'
-        } catch {
-            $this.SelectedIndex = $(if ($script:clockFormat -eq '12h') { 1 } else { 0 })
-            $clockStatus.Foreground = [Windows.Media.Brushes]::Firebrick
-            $clockStatus.Text = '保存时钟格式失败，请重试。'
         }
     })
     if ($dialog.ShowDialog()) { Load-Tasks }
