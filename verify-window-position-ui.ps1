@@ -49,7 +49,7 @@ function Assert-Reachable {
 
 try {
     $source = [IO.File]::ReadAllText((Join-Path $root 'Start.ps1'))
-    foreach ($module in 'Runtime.ps1','Theme.ps1','Background.ps1','Calendar.ps1','FollowSettings.ps1','WindowPosition.ps1','ClockSettings.ps1') {
+    foreach ($module in 'Runtime.ps1','Theme.ps1','Background.ps1','Calendar.ps1','FollowSettings.ps1','WindowPosition.ps1','ClockSettings.ps1','DisplaySettings.ps1') {
         $modulePath = (Join-Path $root $module).Replace("'", "''")
         $source = $source.Replace(". (Join-Path `$PSScriptRoot '$module')", ". '$modulePath'")
     }

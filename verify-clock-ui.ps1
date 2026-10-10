@@ -76,7 +76,7 @@ try {
     $fakeFollowPath = Join-Path $fixture 'FollowSettings.ps1'
     [IO.File]::WriteAllText($fakeFollowPath, 'function Get-FollowEnabled { return $false }', [Text.UTF8Encoding]::new($true))
     $source = [IO.File]::ReadAllText((Join-Path $root 'Start.ps1'), [Text.Encoding]::UTF8)
-    foreach ($module in 'Runtime.ps1','Theme.ps1','Background.ps1','Calendar.ps1','FollowSettings.ps1','WindowPosition.ps1','ClockSettings.ps1') {
+    foreach ($module in 'Runtime.ps1','Theme.ps1','Background.ps1','Calendar.ps1','FollowSettings.ps1','WindowPosition.ps1','ClockSettings.ps1','DisplaySettings.ps1') {
         $modulePath = $(if ($module -eq 'FollowSettings.ps1') { $fakeFollowPath } else { Join-Path $root $module }).Replace("'", "''")
         $source = $source.Replace("(Join-Path `$PSScriptRoot '$module')", "'$modulePath'")
         $source = $source.Replace("Join-Path `$PSScriptRoot '$module'", "'$modulePath'")

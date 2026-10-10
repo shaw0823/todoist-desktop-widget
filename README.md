@@ -36,6 +36,8 @@ Todoist Widget 是一个基于 Todoist 官方 API 的第三方独立 Windows 任
 
 顶部的独立时钟栏以较大的字体显示当前本地时间，包含小时、分钟和秒，运行时持续更新。默认使用 24 小时制；在 **⚙ 设置 → 时钟** 中可切换为 12 小时制，显示“上午”或“下午”。切换后立即生效并保存在本机 `%LOCALAPPDATA%\TodoistDesktopWidget\clock.json`，下次打开继续使用。
 
+点击标题栏的 **☷** 打开“显示内容”，可分别开关时间、月历和列表。修改立即生效并保存在本机 `%LOCALAPPDATA%\TodoistDesktopWidget\display.json`。关闭时间会隐藏时钟；只保留一个任务视图时，切换按钮会隐藏。月历和列表都关闭时，组件收成简洁视图，仍能点击 **☷** 重新开启。三个选项首次使用时均默认开启。
+
 ## 列表与月历切换
 
 点击日期旁的 **月历**，展开完整月份的周一至周日网格。每天显示任务数量和最多三项任务摘要，更多任务通过“另有 N 项”提示；窗口缩小时会自动减少摘要行，悬停可查看完整任务标题。色条按 Todoist 优先级区分，普通任务使用自定义强调色。
@@ -114,6 +116,8 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\verify-window-position
 powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File .\verify-window-position-ui.ps1
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\verify-clock-settings.ps1
 powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File .\verify-clock-ui.ps1
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\verify-display-settings.ps1
+powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File .\verify-display-ui.ps1
 ```
 
 测试使用模拟网络响应和进程状态，不读取真实 API Token，也不会调用 Todoist API。动画测试会短暂显示一个测试窗口。

@@ -8,10 +8,13 @@ theme.json
 background.json
 window-position.json
 clock.json
+display.json
 .window-position-test-*/
 .window-position-ui-test-*/
 .clock-test-*/
 .clock-ui-test-*/
+.display-test-*/
+.display-ui-test-*/
 *.tmp
 .theme-ui-test-*/
 .background-test-*/

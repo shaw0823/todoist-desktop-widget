@@ -14,9 +14,12 @@ $tokenPath = Join-Path $dataDir 'token.dat'
 . (Join-Path $PSScriptRoot 'FollowSettings.ps1')
 . (Join-Path $PSScriptRoot 'WindowPosition.ps1')
 . (Join-Path $PSScriptRoot 'ClockSettings.ps1')
+. (Join-Path $PSScriptRoot 'DisplaySettings.ps1')
 $windowPositionPath = Join-Path $dataDir 'window-position.json'
 $clockSettingsPath = Join-Path $dataDir 'clock.json'
 $script:clockFormat = (Read-ClockSettings -Path $clockSettingsPath).Format
+$displaySettingsPath = Join-Path $dataDir 'display.json'
+$script:displaySettings = Read-DisplaySettings -Path $displaySettingsPath
 $script:positionReady = $false
 $themePath = Join-Path $dataDir 'theme.json'
 $script:theme = Read-Theme $themePath
@@ -26,7 +29,7 @@ $script:wallpaperCache = $null
 $script:token = ''
 $script:date = [DateTime]::Today
 $script:viewMode = 'List'
-$script:viewSizes = @{ List = @{Width=400.0; Height=460.0}; Calendar = @{Width=780.0; Height=780.0} }
+$script:viewSizes = @{ List = @{Width=400.0; Height=460.0}; Calendar = @{Width=780.0; Height=780.0}; Minimal = @{Width=400.0; Height=140.0} }
 $script:storedWindowPosition = Read-WindowPosition -Path $windowPositionPath
 if ($null -ne $script:storedWindowPosition) {
     foreach ($mode in @($script:viewSizes.Keys)) {
@@ -109,12 +112,12 @@ if (Test-Path $tokenPath) {
     <Grid x:Name="Header" Background="#01000000" MinHeight="30" Cursor="SizeAll" ToolTip="拖动标题或顶部空白处移动组件" Margin="0,0,0,8">
      <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
      <TextBlock Text="☀ Todoist" FontWeight="Bold" VerticalAlignment="Center"/>
-     <StackPanel Grid.Column="2" Orientation="Horizontal"><Button x:Name="Appearance" Content="◐" ToolTip="颜色、壁纸和透明度"/><Button x:Name="Settings" Content="⚙" ToolTip="连接、启动和时钟设置"/><Button x:Name="Pin" Content="📌" ToolTip="切换置顶" Background="{DynamicResource WidgetAccent}" Foreground="{DynamicResource WidgetBackground}"/><Button x:Name="Refresh" Content="↻" ToolTip="刷新"/><Button x:Name="Close" Content="×" ToolTip="关闭"/></StackPanel>
+     <StackPanel Grid.Column="2" Orientation="Horizontal"><Button x:Name="DisplayOptions" Content="☷" ToolTip="显示内容开关"/><Button x:Name="Appearance" Content="◐" ToolTip="颜色、壁纸和透明度"/><Button x:Name="Settings" Content="⚙" ToolTip="连接、启动和时钟设置"/><Button x:Name="Pin" Content="📌" ToolTip="切换置顶" Background="{DynamicResource WidgetAccent}" Foreground="{DynamicResource WidgetBackground}"/><Button x:Name="Refresh" Content="↻" ToolTip="刷新"/><Button x:Name="Close" Content="×" ToolTip="关闭"/></StackPanel>
     </Grid>
     <Border x:Name="ClockSurface" HorizontalAlignment="Center" Background="{DynamicResource WidgetSurface}" BorderBrush="{DynamicResource WidgetControlBorder}" BorderThickness="1" CornerRadius="8" Padding="16,4" Margin="0,0,0,8" Cursor="SizeAll" ToolTip="拖动时钟移动组件">
      <TextBlock x:Name="Clock" FontFamily="Segoe UI Variable Display, Segoe UI" FontWeight="SemiBold" FontSize="22" Typography.NumeralAlignment="Tabular" TextAlignment="Center" Foreground="{DynamicResource WidgetForeground}"/>
     </Border>
-    <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,0,0,8"><Button x:Name="Previous" Content="‹"/><Button x:Name="Day" Content="今天"/><Button x:Name="Next" Content="›"/><Button x:Name="ViewToggle" Content="月历" ToolTip="切换到完整月历" Margin="10,2,2,2"/></StackPanel>
+    <StackPanel x:Name="DateNavigation" Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,0,0,8"><Button x:Name="Previous" Content="‹"/><Button x:Name="Day" Content="今天"/><Button x:Name="Next" Content="›"/><Button x:Name="ViewToggle" Content="月历" ToolTip="切换到完整月历" Margin="10,2,2,2"/></StackPanel>
     <TextBox x:Name="Input" Background="{DynamicResource WidgetSurface}" Foreground="{DynamicResource WidgetForeground}" CaretBrush="{DynamicResource WidgetForeground}" BorderBrush="{DynamicResource WidgetControlBorder}" BorderThickness="1.5" Padding="9" Margin="0,0,0,8" ToolTip="输入任务内容，回车添加到当前日期"/>
    </StackPanel>
    <TextBlock x:Name="Status" DockPanel.Dock="Bottom" Foreground="{DynamicResource WidgetMuted}" TextWrapping="Wrap" Margin="0,8,0,0" FontSize="11"/>
@@ -129,6 +132,7 @@ if (Test-Path $tokenPath) {
      </Border>
      <UniformGrid x:Name="CalendarDays" Grid.Row="1" Columns="7"/>
     </Grid>
+    <TextBlock x:Name="NoViewsHint" Text="月历和列表已关闭。点击 ☷ 可重新开启。" Foreground="{DynamicResource WidgetMuted}" TextWrapping="Wrap" TextAlignment="Center" HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="Collapsed"/>
    </Grid>
   </DockPanel>
   </Grid>
@@ -141,7 +145,7 @@ if (Test-Path $tokenPath) {
 '@
 $window = [Windows.Markup.XamlReader]::Load((New-Object Xml.XmlNodeReader $xaml))
 $ui = @{}
-'Header','ClockSurface','Clock','Appearance','Settings','Pin','Refresh','Close','Previous','Day','Next','ViewToggle','Input','Status','Tasks','ListView','CalendarView','CalendarDays','ResizeHandle','WidgetFrame','BackgroundLayer','BackgroundFill','WallpaperOverlay' | ForEach-Object { $ui[$_] = $window.FindName($_) }
+'Header','ClockSurface','Clock','DisplayOptions','Appearance','Settings','Pin','Refresh','Close','DateNavigation','Previous','Day','Next','ViewToggle','Input','Status','Tasks','ListView','CalendarView','CalendarDays','NoViewsHint','ResizeHandle','WidgetFrame','BackgroundLayer','BackgroundFill','WallpaperOverlay' | ForEach-Object { $ui[$_] = $window.FindName($_) }
 $window.Width = $script:viewSizes.List.Width
 $window.Height = $script:viewSizes.List.Height
 function Save-WidgetPosition {
@@ -308,6 +312,7 @@ function Animate-Complete($check) {
 }
 function Load-Tasks {
     Render-Tasks
+    if ($script:viewMode -eq 'Minimal') { return }
     if ($script:busy -or $script:pending.Count) { return }
     if (!$script:token) { $ui.Status.Text='点击 ⚙ 输入 Todoist API Token 以连接账号。'; return }
     $script:busy=$true
@@ -450,14 +455,18 @@ function Render-Calendar {
             $state.More.Visibility = $(if ($state.Count -gt $shown) { 'Visible' } else { 'Collapsed' })
         })
         $cell.Content = $content
-        $cell.ToolTip = $date.ToString('M月d日') + ' · 点击查看当天任务'
+        $cell.ToolTip = $date.ToString('M月d日') + $(if ($script:displaySettings.ShowList) { ' · 点击查看当天任务' } else { ' · 在显示设置中开启列表后可查看当天任务' })
         if ($tasks.Count) { $cell.ToolTip += "`n" + (($tasks | ForEach-Object { $_.content }) -join "`n") }
-        $cell.Add_Click({ $script:date = [DateTime]$this.Tag; Set-WidgetView 'List' })
+        $cell.Add_Click({ if ($script:displaySettings.ShowList) { $script:date = [DateTime]$this.Tag; Set-WidgetView 'List' } })
         $ui.CalendarDays.Children.Add($cell) | Out-Null
     }
-    $ui.Status.Text = "本月 $monthCount 项 · 点击日期查看任务 · 每分钟刷新"
+    $ui.Status.Text = "本月 $monthCount 项 · $(if ($script:displaySettings.ShowList) { '点击日期查看任务 · ' } else { '' })每分钟刷新"
 }
 function Render-Tasks {
+    if ($script:viewMode -eq 'Minimal') {
+        $ui.Status.Text = ''
+        return
+    }
     if ($script:viewMode -eq 'Calendar') {
         $ui.Day.Content = $script:date.ToString('yyyy年M月')
         $ui.Day.ToolTip = '返回本月'
@@ -472,18 +481,31 @@ function Render-Tasks {
         Render-DailyTasks
     }
 }
-function Set-WidgetView([ValidateSet('List','Calendar')][string]$Mode) {
-    if ($Mode -eq $script:viewMode) { Render-Tasks; return }
+function Update-ViewVisibility {
+    $calendar = $script:viewMode -eq 'Calendar'
+    $minimal = $script:viewMode -eq 'Minimal'
+    $ui.ListView.Visibility = $(if (!$calendar -and !$minimal) { 'Visible' } else { 'Collapsed' })
+    $ui.Input.Visibility = $(if (!$calendar -and !$minimal) { 'Visible' } else { 'Collapsed' })
+    $ui.CalendarView.Visibility = $(if ($calendar) { 'Visible' } else { 'Collapsed' })
+    $ui.NoViewsHint.Visibility = $(if ($minimal) { 'Visible' } else { 'Collapsed' })
+    $ui.DateNavigation.Visibility = $(if ($minimal) { 'Collapsed' } else { 'Visible' })
+    $ui.Status.Visibility = $(if ($minimal) { 'Collapsed' } else { 'Visible' })
+    $ui.Refresh.Visibility = $(if ($minimal) { 'Collapsed' } else { 'Visible' })
+    $ui.ViewToggle.Visibility = $(if ($script:displaySettings.ShowList -and $script:displaySettings.ShowCalendar) { 'Visible' } else { 'Collapsed' })
+    $ui.ViewToggle.Content = $(if ($calendar) { '列表' } else { '月历' })
+    $ui.ViewToggle.ToolTip = $(if ($calendar) { '切换到每日任务列表' } else { '切换到完整月历' })
+}
+function Set-WidgetView([ValidateSet('List','Calendar','Minimal')][string]$Mode) {
+    if ($Mode -eq 'List' -and !$script:displaySettings.ShowList) { return }
+    if ($Mode -eq 'Calendar' -and !$script:displaySettings.ShowCalendar) { return }
+    if ($Mode -eq 'Minimal' -and ($script:displaySettings.ShowList -or $script:displaySettings.ShowCalendar)) { return }
+    if ($Mode -eq $script:viewMode) { Update-ViewVisibility; Render-Tasks; return }
     $script:viewSizes[$script:viewMode] = @{Width=$window.Width; Height=$window.Height}
     $script:viewMode = $Mode
     $calendar = $Mode -eq 'Calendar'
-    $ui.ListView.Visibility = $(if ($calendar) { 'Collapsed' } else { 'Visible' })
-    $ui.Input.Visibility = $(if ($calendar) { 'Collapsed' } else { 'Visible' })
-    $ui.CalendarView.Visibility = $(if ($calendar) { 'Visible' } else { 'Collapsed' })
-    $ui.ViewToggle.Content = $(if ($calendar) { '列表' } else { '月历' })
-    $ui.ViewToggle.ToolTip = $(if ($calendar) { '切换到每日任务列表' } else { '切换到完整月历' })
+    Update-ViewVisibility
     $window.MinWidth = $(if ($calendar) { 560 } else { 340 })
-    $window.MinHeight = $(if ($calendar) { 440 } else { 240 })
+    $window.MinHeight = $(if ($calendar) { 440 } elseif ($Mode -eq 'Minimal') { 110 } else { 240 })
     $window.Width = $script:viewSizes[$Mode].Width
     $window.Height = $script:viewSizes[$Mode].Height
     # Keep an expanded calendar on the widget's current monitor.
@@ -500,6 +522,75 @@ function Set-WidgetView([ValidateSet('List','Calendar')][string]$Mode) {
     if (![double]::IsNaN($window.Left)) { $window.Left = [Math]::Max($left, [Math]::Min($window.Left, $right - $window.Width)) }
     if (![double]::IsNaN($window.Top)) { $window.Top = [Math]::Max($top, [Math]::Min($window.Top, $bottom - $window.Height)) }
     Render-Tasks
+}
+function Apply-DisplaySettings {
+    $ui.ClockSurface.Visibility = $(if ($script:displaySettings.ShowClock) { 'Visible' } else { 'Collapsed' })
+    if ($clockTimer) {
+        if ($script:displaySettings.ShowClock) { Update-ClockDisplay; $clockTimer.Start() }
+        else { $clockTimer.Stop() }
+    }
+    $previousMode = $script:viewMode
+    $targetMode = $script:viewMode
+    if (!$script:displaySettings.ShowList -and !$script:displaySettings.ShowCalendar) {
+        $targetMode = 'Minimal'
+    } elseif ($targetMode -eq 'Minimal' -or ($targetMode -eq 'List' -and !$script:displaySettings.ShowList) -or ($targetMode -eq 'Calendar' -and !$script:displaySettings.ShowCalendar)) {
+        $targetMode = $(if ($script:displaySettings.ShowList) { 'List' } else { 'Calendar' })
+    }
+    Set-WidgetView $targetMode
+    if ($previousMode -eq 'Minimal' -and $targetMode -ne 'Minimal') { Load-Tasks }
+}
+function Configure-Display {
+    [xml]$displayXaml = @'
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" Title="显示内容" Width="330" SizeToContent="Height" ResizeMode="NoResize" WindowStartupLocation="CenterOwner" Background="#F5F6F7">
+ <StackPanel Margin="20">
+  <TextBlock Text="显示内容" FontSize="18" FontWeight="SemiBold" Margin="0,0,0,6"/>
+  <TextBlock Text="按需开启或关闭，修改后立即保存。" Foreground="#59636A" TextWrapping="Wrap" Margin="0,0,0,14"/>
+  <CheckBox x:Name="ShowClock" Content="时间" FontSize="14" Margin="0,0,0,12"/>
+  <CheckBox x:Name="ShowCalendar" Content="月历" FontSize="14" Margin="0,0,0,12"/>
+  <CheckBox x:Name="ShowList" Content="列表" FontSize="14" Margin="0,0,0,10"/>
+  <TextBlock x:Name="DisplayStatus" Foreground="#59636A" FontSize="11" TextWrapping="Wrap"/>
+  <Button x:Name="CloseDisplay" Content="关闭" IsCancel="True" HorizontalAlignment="Right" MinWidth="75" Padding="8,5" Margin="0,14,0,0"/>
+ </StackPanel>
+</Window>
+'@
+    $dialog = [Windows.Markup.XamlReader]::Load((New-Object Xml.XmlNodeReader $displayXaml))
+    $dialog.Owner = $window
+    $clockCheck = $dialog.FindName('ShowClock')
+    $calendarCheck = $dialog.FindName('ShowCalendar')
+    $listCheck = $dialog.FindName('ShowList')
+    $message = $dialog.FindName('DisplayStatus')
+    $clockCheck.IsChecked = $script:displaySettings.ShowClock
+    $calendarCheck.IsChecked = $script:displaySettings.ShowCalendar
+    $listCheck.IsChecked = $script:displaySettings.ShowList
+    $message.Text = '月历和列表都关闭时，组件只显示标题和可选时间。'
+    $toggleDisplay = {
+        $candidate = @{
+            ShowClock = [bool]$clockCheck.IsChecked
+            ShowCalendar = [bool]$calendarCheck.IsChecked
+            ShowList = [bool]$listCheck.IsChecked
+        }
+        $previous = $script:displaySettings
+        try {
+            Save-DisplaySettings -Settings $candidate -Path $displaySettingsPath
+            $script:displaySettings = $candidate
+            Apply-DisplaySettings
+            $message.Foreground = [Windows.Media.Brushes]::DimGray
+            $message.Text = '已保存。'
+        } catch {
+            $script:displaySettings = $previous
+            try { Save-DisplaySettings -Settings $previous -Path $displaySettingsPath } catch {}
+            try { Apply-DisplaySettings } catch {}
+            $clockCheck.IsChecked = $previous.ShowClock
+            $calendarCheck.IsChecked = $previous.ShowCalendar
+            $listCheck.IsChecked = $previous.ShowList
+            $message.Foreground = [Windows.Media.Brushes]::Firebrick
+            $message.Text = '保存显示设置失败，请重试。'
+        }
+    }
+    $clockCheck.Add_Click($toggleDisplay)
+    $calendarCheck.Add_Click($toggleDisplay)
+    $listCheck.Add_Click($toggleDisplay)
+    $dialog.ShowDialog() | Out-Null
 }
 function Configure-Theme {
     $originalTheme = Get-NormalizedTheme $script:theme
@@ -816,6 +907,7 @@ $dragWidget = {
 }
 $ui.Header.Add_PreviewMouseLeftButtonDown($dragWidget)
 $ui.ClockSurface.Add_PreviewMouseLeftButtonDown($dragWidget)
+$ui.DisplayOptions.Add_Click({ Configure-Display })
 $ui.Settings.Add_Click({ Configure })
 $ui.Appearance.Add_Click({ Configure-Theme })
 $ui.Pin.Add_Click({ $window.Topmost = !$window.Topmost; $ui.Pin.Opacity = $(if ($window.Topmost) {1} else {0.45}) })
@@ -934,6 +1026,7 @@ $window.Add_Closed({
     $timer.Stop(); $poll.Stop(); $clockTimer.Stop()
     foreach ($job in $script:jobs) { if ($job.Worker) { $job.Worker.Stop(); $job.Worker.Dispose() } }
 })
+Apply-DisplaySettings
 $window.ShowDialog() | Out-Null
 } finally {
     $widgetMutex.ReleaseMutex()
