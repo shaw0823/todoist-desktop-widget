@@ -30,6 +30,7 @@ Todoist Widget 是一个基于 Todoist 官方 API 的第三方独立 Windows 任
 - 显示当前日期的未完成任务，每分钟刷新。
 - 勾选后立即变色并显示删除线，后台同步成功后淡出收起；同步失败会恢复任务。循环任务由 Todoist 推进到下一次日期。
 - 输入任务内容并回车，添加到所选日期。
+- 浏览非今天的列表时，可在每条未完成待办右侧点 **复制到今天**，逐条挑选需要重做的任务。复制会新建一条今天到期的待办，原待办仍保留；已完成待办不会显示在列表中。标题、描述、项目、分区、标签和优先级会保留；有时间的待办沿用本机时钟上的相同时间。循环规则和原父任务关系不会复制。复制中按钮暂时禁用，成功后显示“已复制”，避免连续点出重复项。
 - Token 使用 Windows DPAPI 当前用户加密，保存在 `%LOCALAPPDATA%\TodoistDesktopWidget\token.dat`。
 
 ## 顶部时钟
@@ -122,6 +123,8 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\verify-clock-settings.
 powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File .\verify-clock-ui.ps1
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\verify-display-settings.ps1
 powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File .\verify-display-ui.ps1
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\verify-task-copy.ps1
+powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File .\verify-task-copy-ui.ps1
 ```
 
 测试使用模拟网络响应和进程状态，不读取真实 API Token，也不会调用 Todoist API。动画测试会短暂显示一个测试窗口。

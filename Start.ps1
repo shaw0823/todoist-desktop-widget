@@ -12,6 +12,7 @@ $tokenPath = Join-Path $dataDir 'token.dat'
 . (Join-Path $PSScriptRoot 'Theme.ps1')
 . (Join-Path $PSScriptRoot 'Background.ps1')
 . (Join-Path $PSScriptRoot 'Calendar.ps1')
+. (Join-Path $PSScriptRoot 'TaskCopy.ps1')
 . (Join-Path $PSScriptRoot 'FollowSettings.ps1')
 . (Join-Path $PSScriptRoot 'WindowPosition.ps1')
 . (Join-Path $PSScriptRoot 'ClockSettings.ps1')
@@ -42,6 +43,8 @@ if ($null -ne $script:storedWindowPosition) {
 $script:busy = $false
 $script:jobs = [Collections.Generic.List[object]]::new()
 $script:pending = @{}
+$script:copyPending = @{}
+$script:copiedToday = @{}
 $script:cachedTasks = @()
 $script:revision = 0
 function Save-Token([string]$value) {
@@ -368,6 +371,27 @@ function Load-Tasks {
     $ui.Status.Text='正在同步…'
     Start-Request 'Load' 'Get' 'tasks' $null $script:revision
 }
+function Copy-TaskToToday($button) {
+    $state = $button.Tag
+    if ($script:date.Date -eq [DateTime]::Today) { return }
+    $state.Key = [DateTime]::Today.ToString('yyyy-MM-dd', [Globalization.CultureInfo]::InvariantCulture) + ':' + [string]$state.Task.id
+    $key = [string]$state.Key
+    if ($script:copyPending.ContainsKey($key) -or $script:copiedToday.ContainsKey($key)) { return }
+    if (!$script:token) { $ui.Status.Text = '请先在 ⚙ → 关联 中连接 Todoist。'; return }
+    try {
+        $body = New-TodayCopyRequestBody -Task $state.Task -Today ([DateTime]::Today)
+        $script:copyPending[$key] = $true
+        $button.IsEnabled = $false
+        $button.Content = '复制中…'
+        $ui.Status.Text = '正在复制这条待办到今天…'
+        Start-Request 'Copy' 'Post' 'tasks' $body $state
+    } catch {
+        $script:copyPending.Remove($key)
+        $button.IsEnabled = $true
+        $button.Content = '复制到今天'
+        $ui.Status.Text = '复制失败：' + $_.Exception.Message
+    }
+}
 function Render-DailyTasks {
         $selected = $script:date.ToString('yyyy-MM-dd', [Globalization.CultureInfo]::InvariantCulture)
         $candidates = @($script:cachedTasks)
@@ -376,7 +400,12 @@ function Render-DailyTasks {
         foreach ($state in $script:pending.Values) {
             if (!$cachedIds.ContainsKey([string]$state.Id)) { $candidates += $state.Task }
         }
-        $items = @($candidates | Where-Object { (Get-TaskDateKey $_) -eq $selected } | Sort-Object @{Expression={$_.due.date}},order)
+        $items = @($candidates | Where-Object {
+            (Get-TaskDateKey $_) -eq $selected -and
+            (Get-CalendarObjectValue $_ 'checked') -ne $true -and
+            (Get-CalendarObjectValue $_ 'is_completed') -ne $true -and
+            $null -eq (Get-CalendarObjectValue $_ 'completed_at')
+        } | Sort-Object @{Expression={$_.due.date}},order)
         $ui.Tasks.Children.Clear()
         foreach ($task in $items) {
             if ($script:pending.ContainsKey($task.id)) {
@@ -391,6 +420,22 @@ function Render-DailyTasks {
             $check.Margin='0,2,10,0'; $check.ToolTip='完成任务并同步到 Todoist'
             $check.Add_Click({ Animate-Complete $this })
             $row.Children.Add($check) | Out-Null
+            if ($selected -ne [DateTime]::Today.ToString('yyyy-MM-dd', [Globalization.CultureInfo]::InvariantCulture)) {
+                $copy = [Windows.Controls.Button]::new()
+                $copyKey = [DateTime]::Today.ToString('yyyy-MM-dd', [Globalization.CultureInfo]::InvariantCulture) + ':' + [string]$task.id
+                $copy.Content = '复制到今天'
+                $copy.ToolTip = '只把这条未完成待办复制到今天，原待办保留'
+                $copy.FontSize = 11
+                $copy.Padding = '5,2,5,2'
+                $copy.Margin = '8,0,0,0'
+                $copy.VerticalAlignment = 'Center'
+                if ($script:copyPending.ContainsKey($copyKey)) { $copy.Content = '复制中…'; $copy.IsEnabled = $false }
+                if ($script:copiedToday.ContainsKey($copyKey)) { $copy.Content = '已复制'; $copy.IsEnabled = $false }
+                $copy.Tag = @{ Key = $copyKey; Task = $task }
+                $copy.Add_Click({ Copy-TaskToToday $this })
+                [Windows.Controls.DockPanel]::SetDock($copy, [Windows.Controls.Dock]::Right)
+                $row.Children.Add($copy) | Out-Null
+            }
             $label = New-Object Windows.Controls.TextBlock
             $label.Text=$task.content; $label.TextWrapping='Wrap'; $label.FontSize=13
             $label.SetResourceReference([Windows.Controls.TextBlock]::ForegroundProperty, 'WidgetForeground')
@@ -1066,6 +1111,22 @@ $poll.Add_Tick({
                 $ui.Input.IsEnabled=$true
                 if (!$failure) { $ui.Input.Clear(); $script:revision++; Load-Tasks }
             }
+            'Copy' {
+                $state = $job.Context
+                $script:copyPending.Remove([string]$state.Key)
+                if ($failure) {
+                    Render-Tasks
+                    $ui.Status.Text = '复制失败，请重试：' + $failure.Exception.Message
+                } else {
+                    $script:copiedToday[[string]$state.Key] = $true
+                    if ($output.Count -and $null -ne (Get-CalendarObjectValue $output[-1] 'id')) {
+                        $script:cachedTasks += $output[-1]
+                    }
+                    $script:revision++
+                    Load-Tasks
+                    $ui.Status.Text = '已把这一条待办复制到今天。'
+                }
+            }
             'Follow' {
                 $state = $job.Context
                 $state.Check.IsEnabled = $true
@@ -1082,7 +1143,7 @@ $poll.Add_Tick({
                 }
             }
         }
-        if ($failure -and $job.Kind -ne 'Follow') { Show-Error $failure }
+        if ($failure -and $job.Kind -ne 'Follow' -and $job.Kind -ne 'Copy') { Show-Error $failure }
     }
 })
 $poll.Start()

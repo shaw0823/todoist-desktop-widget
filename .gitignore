@@ -21,6 +21,7 @@ display.json
 .background-test-*/
 .wallpaper-ui-test-*/
 .calendar-ui-test-*/
+.task-copy-ui-test-*/
 .follow-settings-test-*/
 .follow-settings-ui-test-*/
 
