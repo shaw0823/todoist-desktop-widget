@@ -8,6 +8,9 @@ $window = $null
 function Assert-Equal($Actual, $Expected, [string]$Message) {
     if ($Actual -cne $Expected) { throw "$Message (expected $Expected; got $Actual)" }
 }
+function Assert-Near([double]$Actual, [double]$Expected, [string]$Message) {
+    if ([Math]::Abs($Actual - $Expected) -gt 2) { throw "$Message (expected about $Expected; got $Actual)" }
+}
 function Pump([int]$Milliseconds) {
     $frame = [Windows.Threading.DispatcherFrame]::new()
     $end = [Windows.Threading.DispatcherTimer]::new()
@@ -49,7 +52,7 @@ function Assert-Reachable {
 
 try {
     $source = [IO.File]::ReadAllText((Join-Path $root 'Start.ps1'))
-    foreach ($module in 'Runtime.ps1','Theme.ps1','Background.ps1','Calendar.ps1','FollowSettings.ps1','WindowPosition.ps1','ClockSettings.ps1','DisplaySettings.ps1') {
+    foreach ($module in 'Runtime.ps1','Theme.ps1','Background.ps1','Calendar.ps1','FollowSettings.ps1','WindowPosition.ps1','ClockSettings.ps1','DisplaySettings.ps1','Tray.ps1') {
         $modulePath = (Join-Path $root $module).Replace("'", "''")
         $source = $source.Replace(". (Join-Path `$PSScriptRoot '$module')", ". '$modulePath'")
     }
@@ -66,13 +69,15 @@ try {
     # Keep the real Loaded/Closing/Closed events. Disable automatic data fetching.
     $source = [regex]::Replace($source, '(?m)^\$window\.Add_ContentRendered\(\{[^\r\n]*\}\)\r?\n', '')
     $source = [regex]::Replace($source, '(?ms)^\$window\.Add_ContentRendered\(\{\r?\n.*?^\}\)\r?\n', '')
-    $source = $source.Replace('$window.ShowDialog() | Out-Null', '$timer.Stop(); $poll.Stop()')
+    $source = $source.Replace('Start-WidgetMessageLoop -Window $window', '$timer.Stop(); $poll.Stop()')
 
-    foreach ($scenario in 'MoveAndClose','Reopen','Corrupt','Offscreen') {
+    foreach ($scenario in 'MoveAndClose','Reopen','RightToLeftClose','RightToLeftReopen','Corrupt','Offscreen') {
         if ($scenario -eq 'Corrupt') {
             [IO.File]::WriteAllText((Join-Path $testDirectory 'window-position.json'), '{invalid-json', [Text.UTF8Encoding]::new($true))
         } elseif ($scenario -eq 'Offscreen') {
             [IO.File]::WriteAllText((Join-Path $testDirectory 'window-position.json'), '{"Left":900000,"Top":900000,"Views":{"List":{"Width":4000,"Height":2200}}}', [Text.UTF8Encoding]::new($true))
+        } elseif ($scenario -eq 'RightToLeftClose') {
+            Save-DisplaySettings -Settings @{ShowClock=$true; ShowCalendar=$true; ShowList=$true; ViewExpansionDirection='RightToLeft'} -Path (Join-Path $testDirectory 'display.json')
         }
         Invoke-Expression $source
         Assert-Equal $dataDir $testDirectory 'Data directory is isolated'
@@ -152,6 +157,33 @@ try {
             Assert-Persisted $lastLeft $lastTop 'Minimizing never saves Windows sentinel coordinates'
             $window.Close()
             Assert-Persisted $lastLeft $lastTop 'Closing while minimized preserves last normal position'
+        } elseif ($scenario -eq 'RightToLeftClose') {
+            Assert-Equal $script:displaySettings.ViewExpansionDirection 'RightToLeft' 'Right-anchored preference loads'
+            Set-WidgetView 'Calendar'
+            $bounds = Get-TestBounds
+            $area = [Windows.Forms.Screen]::FromHandle([Windows.Interop.WindowInteropHelper]::new($window).Handle).WorkingArea
+            if ($area.Width -lt $bounds[2] + 40) { throw 'Position test needs room for the expanded calendar.' }
+            Move-TestWindow ($area.Right - $bounds[2] - 20) ($area.Top + 30)
+            $bounds = Get-TestBounds
+            $lastRight = $bounds[0] + $bounds[2]
+            $lastTopRight = $bounds[1]
+            $window.Close()
+            $saved = Read-WindowPosition -Path $windowPositionPath
+            Assert-Equal $saved.Right $lastRight 'Closing a calendar saves its physical right edge'
+            Assert-Equal $saved.Top $lastTopRight 'Closing a calendar saves its top edge'
+            Assert-ViewSize 'Calendar' $calendarWidth $calendarHeight 'Calendar dimensions remain saved in right-anchored mode'
+        } elseif ($scenario -eq 'RightToLeftReopen') {
+            Assert-Equal $script:viewMode 'List' 'Restart begins in the list view'
+            $bounds = Get-TestBounds
+            Assert-Near ($bounds[0] + $bounds[2]) $lastRight 'Right edge stays fixed when restarting from a saved calendar'
+            Assert-Equal $bounds[1] $lastTopRight 'Restart from calendar keeps the top edge'
+            Set-WidgetView 'Calendar'
+            $bounds = Get-TestBounds
+            Assert-Near ($bounds[0] + $bounds[2]) $lastRight 'Expanding the restored list retains the right edge'
+            Set-WidgetView 'List'
+            $bounds = Get-TestBounds
+            Assert-Near ($bounds[0] + $bounds[2]) $lastRight 'Collapsing the calendar retains the right edge'
+            $window.Close()
         } else {
             Assert-Reachable
             $bounds = Get-TestBounds
@@ -170,7 +202,7 @@ try {
         Pump 450
     }
     if (Test-Path -LiteralPath $tokenPath) { throw 'Position persistence must not create a token.' }
-    Write-Output 'PASS: isolated WPF movement and resize debounce, per-view sizes after reopening, minimized state, corrupt/offscreen recovery, and timer cleanup.'
+    Write-Output 'PASS: isolated WPF movement and resize debounce, left/right placement after reopening, per-view sizes, minimized state, corrupt/offscreen recovery, and timer cleanup.'
 } finally {
     if ($window) { $window.Close() }
     $resolvedTarget = [IO.Path]::GetFullPath($testDirectory).TrimEnd('\')

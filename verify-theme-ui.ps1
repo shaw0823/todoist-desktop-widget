@@ -1,7 +1,7 @@
 ﻿$ErrorActionPreference = 'Stop'
 $testDirectory = Join-Path $PSScriptRoot ('.theme-ui-test-' + [Guid]::NewGuid().ToString('N'))
 $source = [IO.File]::ReadAllText((Join-Path $PSScriptRoot 'Start.ps1'))
-foreach ($module in 'Runtime.ps1','Theme.ps1','Background.ps1','Calendar.ps1','FollowSettings.ps1','WindowPosition.ps1','ClockSettings.ps1','DisplaySettings.ps1') {
+foreach ($module in 'Runtime.ps1','Theme.ps1','Background.ps1','Calendar.ps1','FollowSettings.ps1','WindowPosition.ps1','ClockSettings.ps1','DisplaySettings.ps1','Tray.ps1') {
     $modulePath = (Join-Path $PSScriptRoot $module).Replace("'", "''")
     $source = $source.Replace(". (Join-Path `$PSScriptRoot '$module')", ". '$modulePath'")
 }
@@ -12,7 +12,7 @@ $fixtureTokenPath = (Join-Path $testDirectory 'token.dat').Replace("'", "''")
 $source = $source.Replace("`$dataDir = Join-Path `$env:LOCALAPPDATA 'TodoistDesktopWidget'", "`$dataDir = '$fixtureDataPath'")
 $source = $source.Replace("`$tokenPath = Join-Path `$dataDir 'token.dat'", "`$tokenPath = '$fixtureTokenPath'")
 $source = $source.Replace('Todoist 桌面小组件', 'Todoist 配色测试')
-$source = $source.Replace('$window.ShowDialog() | Out-Null', '$timer.Stop(); $poll.Stop()')
+$source = $source.Replace('Start-WidgetMessageLoop -Window $window', '$timer.Stop(); $poll.Stop()')
 Invoke-Expression $source
 if ($dataDir -cne $testDirectory -or $tokenPath -cne (Join-Path $testDirectory 'token.dat') -or ![string]::IsNullOrEmpty($script:token)) { throw 'Theme fixture is not isolated.' }
 $window.Show()

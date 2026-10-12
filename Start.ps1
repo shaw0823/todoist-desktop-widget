@@ -1,8 +1,9 @@
 ﻿Add-Type -AssemblyName PresentationFramework,PresentationCore,WindowsBase,System.Security
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'Runtime.ps1')
+. (Join-Path $PSScriptRoot 'Tray.ps1')
 $widgetMutex = Enter-WidgetMutex $widgetMutexName
-if ($null -eq $widgetMutex) { return }
+if ($null -eq $widgetMutex) { Request-WidgetShow; return }
 try {
 if (Test-WidgetOpen) { return }
 $dataDir = Join-Path $env:LOCALAPPDATA 'TodoistDesktopWidget'
@@ -143,7 +144,7 @@ if (Test-Path $tokenPath) {
       </Button>
       <Button x:Name="Pin" Content="📌" ToolTip="切换置顶" Background="{DynamicResource WidgetAccent}" Foreground="{DynamicResource WidgetBackground}"/>
       <Button x:Name="Refresh" Content="↻" ToolTip="刷新"/>
-      <Button x:Name="Close" Content="×" ToolTip="关闭"/>
+      <Button x:Name="Close" Content="×" ToolTip="隐藏到系统托盘"/>
      </StackPanel>
     </Grid>
     <Border x:Name="ClockSurface" HorizontalAlignment="Center" Background="{DynamicResource WidgetSurface}" BorderBrush="{DynamicResource WidgetControlBorder}" BorderThickness="1" CornerRadius="8" Padding="16,4" Margin="0,0,0,8" Cursor="SizeAll" ToolTip="拖动时钟移动组件">
@@ -196,7 +197,7 @@ function Save-WidgetPosition {
                 foreach ($mode in @($previous.Views.Keys)) { $views[$mode] = $previous.Views[$mode] }
             }
             foreach ($mode in @($script:viewSizes.Keys)) { $views[$mode] = $script:viewSizes[$mode] }
-            Save-WindowPosition -Position @{Left=$bounds[0]; Top=$bounds[1]; Views=$views} -Path $windowPositionPath
+            Save-WindowPosition -Position @{Left=$bounds[0]; Top=$bounds[1]; Right=($bounds[0] + $bounds[2]); Views=$views} -Path $windowPositionPath
         }
     } catch {
         # Position preferences must not interrupt task editing; a later move retries.
@@ -209,10 +210,20 @@ function Restore-WidgetPosition {
         Add-Type -AssemblyName System.Windows.Forms
         $handle = [Windows.Interop.WindowInteropHelper]::new($window).Handle
         $bounds = [TodoistWidget.NativeWindow]::GetWidgetBounds($handle)
+        $desiredLeft = $position.Left
+        if ($script:displaySettings.ViewExpansionDirection -eq 'RightToLeft' -and $position.ContainsKey('Right')) {
+            $desiredLeft = $position.Right - $bounds[2]
+        }
         # Both native bounds and screen work areas use the process's screen coordinates.
         $areas = @([Windows.Forms.Screen]::AllScreens | ForEach-Object { $_.WorkingArea })
-        $visible = Get-VisibleWindowPosition -Left $position.Left -Top $position.Top -Width $bounds[2] -Height $bounds[3] -WorkingAreas $areas
-        $area = @($areas | Where-Object {
+        $preferredAreas = $areas
+        if ($script:displaySettings.ViewExpansionDirection -eq 'RightToLeft' -and $position.ContainsKey('Right')) {
+            $rightPoint = [System.Drawing.Point]::new($position.Right - 1, $position.Top)
+            $rightScreen = [Windows.Forms.Screen]::FromPoint($rightPoint)
+            if ($rightScreen.WorkingArea.Contains($rightPoint)) { $preferredAreas = @($rightScreen.WorkingArea) }
+        }
+        $visible = Get-VisibleWindowPosition -Left $desiredLeft -Top $position.Top -Width $bounds[2] -Height $bounds[3] -WorkingAreas $preferredAreas
+        $area = @($preferredAreas | Where-Object {
             $visible.Left -ge $_.Left -and $visible.Left -lt $_.Right -and
             $visible.Top -ge $_.Top -and $visible.Top -lt $_.Bottom
         } | Select-Object -First 1)
@@ -223,7 +234,10 @@ function Restore-WidgetPosition {
                 $window.Width = [Math]::Max($window.MinWidth, [Math]::Min($window.Width, $area[0].Width / $scaleX))
                 $window.Height = [Math]::Max($window.MinHeight, [Math]::Min($window.Height, $area[0].Height / $scaleY))
                 $bounds = [TodoistWidget.NativeWindow]::GetWidgetBounds($handle)
-                $visible = Get-VisibleWindowPosition -Left $position.Left -Top $position.Top -Width $bounds[2] -Height $bounds[3] -WorkingAreas $areas
+                if ($script:displaySettings.ViewExpansionDirection -eq 'RightToLeft' -and $position.ContainsKey('Right')) {
+                    $desiredLeft = $position.Right - $bounds[2]
+                }
+                $visible = Get-VisibleWindowPosition -Left $desiredLeft -Top $position.Top -Width $bounds[2] -Height $bounds[3] -WorkingAreas $preferredAreas
             }
         }
         [TodoistWidget.NativeWindow]::MoveWidget($handle, $visible.Left, $visible.Top)
@@ -535,6 +549,26 @@ function Set-WidgetView([ValidateSet('List','Calendar','Minimal')][string]$Mode)
     if ($Mode -eq 'Calendar' -and !$script:displaySettings.ShowCalendar) { return }
     if ($Mode -eq 'Minimal' -and ($script:displaySettings.ShowList -or $script:displaySettings.ShowCalendar)) { return }
     if ($Mode -eq $script:viewMode) { Update-ViewVisibility; Render-Tasks; return }
+    # Choose the monitor before resizing: the wider view can overlap another display.
+    Add-Type -AssemblyName System.Windows.Forms
+    $handle = [Windows.Interop.WindowInteropHelper]::new($window).Handle
+    $area = [Windows.Forms.Screen]::FromHandle($handle).WorkingArea
+    if ($handle -ne [IntPtr]::Zero) {
+        $nativeBounds = [TodoistWidget.NativeWindow]::GetWidgetBounds($handle)
+        if ($nativeBounds[2] -gt 0 -and $nativeBounds[3] -gt 0) {
+            $anchorX = $(if ($script:displaySettings.ViewExpansionDirection -eq 'RightToLeft') {
+                $nativeBounds[0] + $nativeBounds[2] - 1
+            } else { $nativeBounds[0] })
+            $anchorPoint = [System.Drawing.Point]::new($anchorX, $nativeBounds[1])
+            $anchorScreen = [Windows.Forms.Screen]::FromPoint($anchorPoint)
+            if ($anchorScreen.WorkingArea.Contains($anchorPoint)) { $area = $anchorScreen.WorkingArea }
+        }
+    }
+    $dpi = [Windows.PresentationSource]::FromVisual($window)
+    $scaleX = 1.0; $scaleY = 1.0
+    if ($dpi) { $scaleX = $dpi.CompositionTarget.TransformToDevice.M11; $scaleY = $dpi.CompositionTarget.TransformToDevice.M22 }
+    $previousLeft = $window.Left
+    $previousRight = $previousLeft + $window.Width
     $script:viewSizes[$script:viewMode] = @{Width=$window.Width; Height=$window.Height}
     $script:viewMode = $Mode
     $calendar = $Mode -eq 'Calendar'
@@ -543,17 +577,16 @@ function Set-WidgetView([ValidateSet('List','Calendar','Minimal')][string]$Mode)
     $window.MinHeight = $(if ($calendar) { 440 } elseif ($Mode -eq 'Minimal') { 110 } else { 240 })
     $window.Width = $script:viewSizes[$Mode].Width
     $window.Height = $script:viewSizes[$Mode].Height
-    # Keep an expanded calendar on the widget's current monitor.
-    Add-Type -AssemblyName System.Windows.Forms
-    $handle = [Windows.Interop.WindowInteropHelper]::new($window).Handle
-    $area = [Windows.Forms.Screen]::FromHandle($handle).WorkingArea
-    $dpi = [Windows.PresentationSource]::FromVisual($window)
-    $scaleX = 1.0; $scaleY = 1.0
-    if ($dpi) { $scaleX = $dpi.CompositionTarget.TransformToDevice.M11; $scaleY = $dpi.CompositionTarget.TransformToDevice.M22 }
     $left = $area.Left / $scaleX; $top = $area.Top / $scaleY
     $right = $area.Right / $scaleX; $bottom = $area.Bottom / $scaleY
     $window.Width = [Math]::Max($window.MinWidth, [Math]::Min($window.Width, $area.Width / $scaleX))
     $window.Height = [Math]::Max($window.MinHeight, [Math]::Min($window.Height, $area.Height / $scaleY))
+    # Left-to-right keeps the left edge; right-to-left keeps the right edge.
+    if (![double]::IsNaN($previousLeft)) {
+        $window.Left = $(if ($script:displaySettings.ViewExpansionDirection -eq 'RightToLeft') {
+            $previousRight - $window.Width
+        } else { $previousLeft })
+    }
     if (![double]::IsNaN($window.Left)) { $window.Left = [Math]::Max($left, [Math]::Min($window.Left, $right - $window.Width)) }
     if (![double]::IsNaN($window.Top)) { $window.Top = [Math]::Max($top, [Math]::Min($window.Top, $bottom - $window.Height)) }
     Render-Tasks
@@ -585,6 +618,14 @@ function Configure-Display {
   <CheckBox x:Name="ShowList" Content="列表" FontSize="14" Margin="0,0,0,10"/>
   <Border Background="#E9EEF0" CornerRadius="6" Padding="12" Margin="0,4,0,12">
    <StackPanel>
+    <TextBlock Text="切换视图时向哪边展开" FontSize="14" FontWeight="SemiBold" Margin="0,0,0,8"/>
+    <RadioButton x:Name="ExpandRight" Content="从左向右（固定左边缘）" GroupName="ViewExpansionDirection" Margin="0,0,0,8"/>
+    <RadioButton x:Name="ExpandLeft" Content="从右向左（固定右边缘）" GroupName="ViewExpansionDirection"/>
+    <TextBlock Text="放在桌面右上角时，可选从右向左。" Foreground="#59636A" TextWrapping="Wrap" FontSize="11" Margin="0,8,0,0"/>
+   </StackPanel>
+  </Border>
+  <Border Background="#E9EEF0" CornerRadius="6" Padding="12" Margin="0,4,0,12">
+   <StackPanel>
     <TextBlock Text="时间格式" FontSize="14" FontWeight="SemiBold" Margin="0,0,0,8"/>
     <ComboBox x:Name="ClockFormat" HorizontalAlignment="Left" MinWidth="150" Padding="6,3">
      <ComboBoxItem Content="24 小时制" Tag="24h"/>
@@ -603,12 +644,16 @@ function Configure-Display {
     $clockCheck = $dialog.FindName('ShowClock')
     $calendarCheck = $dialog.FindName('ShowCalendar')
     $listCheck = $dialog.FindName('ShowList')
+    $expandRight = $dialog.FindName('ExpandRight')
+    $expandLeft = $dialog.FindName('ExpandLeft')
     $clockChoice = $dialog.FindName('ClockFormat')
     $clockStatus = $dialog.FindName('ClockFormatStatus')
     $message = $dialog.FindName('DisplayStatus')
     $clockCheck.IsChecked = $script:displaySettings.ShowClock
     $calendarCheck.IsChecked = $script:displaySettings.ShowCalendar
     $listCheck.IsChecked = $script:displaySettings.ShowList
+    $expandRight.IsChecked = $script:displaySettings.ViewExpansionDirection -eq 'LeftToRight'
+    $expandLeft.IsChecked = $script:displaySettings.ViewExpansionDirection -eq 'RightToLeft'
     $clockChoice.SelectedIndex = $(if ($script:clockFormat -eq '12h') { 1 } else { 0 })
     $clockStatus.Text = '切换后立即保存，只影响顶部时间显示。'
     $message.Text = '月历和列表都关闭时，组件只显示标题和可选时间。'
@@ -617,6 +662,7 @@ function Configure-Display {
             ShowClock = [bool]$clockCheck.IsChecked
             ShowCalendar = [bool]$calendarCheck.IsChecked
             ShowList = [bool]$listCheck.IsChecked
+            ViewExpansionDirection = $(if ($expandLeft.IsChecked) { 'RightToLeft' } else { 'LeftToRight' })
         }
         $previous = $script:displaySettings
         try {
@@ -632,6 +678,8 @@ function Configure-Display {
             $clockCheck.IsChecked = $previous.ShowClock
             $calendarCheck.IsChecked = $previous.ShowCalendar
             $listCheck.IsChecked = $previous.ShowList
+            $expandRight.IsChecked = $previous.ViewExpansionDirection -eq 'LeftToRight'
+            $expandLeft.IsChecked = $previous.ViewExpansionDirection -eq 'RightToLeft'
             $message.Foreground = [Windows.Media.Brushes]::Firebrick
             $message.Text = '保存显示设置失败，请重试。'
         }
@@ -639,6 +687,8 @@ function Configure-Display {
     $clockCheck.Add_Click($toggleDisplay)
     $calendarCheck.Add_Click($toggleDisplay)
     $listCheck.Add_Click($toggleDisplay)
+    $expandRight.Add_Click($toggleDisplay)
+    $expandLeft.Add_Click($toggleDisplay)
     $clockChoice.Add_SelectionChanged({
         if ($null -eq $this.SelectedItem) { return }
         $desiredFormat = [string]$this.SelectedItem.Tag
@@ -952,7 +1002,7 @@ $ui.AppearanceMenuItem.Add_Click({ $ui.MenuButton.ContextMenu.IsOpen = $false; C
 $ui.DisplayMenuItem.Add_Click({ $ui.MenuButton.ContextMenu.IsOpen = $false; Configure-Display })
 $ui.SettingsMenuItem.Add_Click({ $ui.MenuButton.ContextMenu.IsOpen = $false; Configure })
 $ui.Pin.Add_Click({ $window.Topmost = !$window.Topmost; $ui.Pin.Opacity = $(if ($window.Topmost) {1} else {0.45}) })
-$ui.Close.Add_Click({ $window.Close() })
+$ui.Close.Add_Click({ Hide-WidgetToTray })
 $ui.Refresh.Add_Click({ Load-Tasks })
 $ui.ViewToggle.Add_Click({ Set-WidgetView $(if ($script:viewMode -eq 'List') { 'Calendar' } else { 'List' }) })
 $ui.Previous.Add_Click({ $script:date = $(if ($script:viewMode -eq 'Calendar') { $script:date.AddMonths(-1) } else { $script:date.AddDays(-1) }); Load-Tasks })
@@ -1066,10 +1116,15 @@ $window.Add_Closed({
     $script:positionReady = $false
     $timer.Stop(); $poll.Stop(); $clockTimer.Stop()
     foreach ($job in $script:jobs) { if ($job.Worker) { $job.Worker.Stop(); $job.Worker.Dispose() } }
+    Dispose-WidgetTray
+    if ($script:trayLoopRunning -and !$window.Dispatcher.HasShutdownStarted) {
+        $window.Dispatcher.BeginInvokeShutdown([Windows.Threading.DispatcherPriority]::Background)
+    }
 })
 Apply-DisplaySettings
-$window.ShowDialog() | Out-Null
+Start-WidgetMessageLoop -Window $window
 } finally {
+    Dispose-WidgetTray
     $widgetMutex.ReleaseMutex()
     $widgetMutex.Dispose()
 }

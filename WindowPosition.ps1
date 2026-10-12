@@ -67,11 +67,14 @@ function Get-NormalizedWindowPosition {
     if ($Position -isnot [System.Collections.IDictionary] -and $Position -isnot [pscustomobject]) {
         throw 'Window position must contain Left and Top coordinates.'
     }
-    return @{
+    $normalized = @{
         Left = ConvertTo-WindowCoordinate (Get-WindowPositionValue $Position 'Left')
         Top = ConvertTo-WindowCoordinate (Get-WindowPositionValue $Position 'Top')
         Views = Get-NormalizedWindowViews (Get-WindowPositionValue $Position 'Views')
     }
+    $right = Get-WindowPositionValue $Position 'Right'
+    if ($null -ne $right) { $normalized.Right = ConvertTo-WindowCoordinate $right }
+    return $normalized
 }
 
 function Read-WindowPosition {
@@ -99,7 +102,10 @@ function Save-WindowPosition {
     [System.IO.Directory]::CreateDirectory($directory) | Out-Null
     $temporary = Join-Path $directory ('.window-position-' + [Guid]::NewGuid().ToString('N') + '.tmp')
     try {
-        $json = ConvertTo-Json -InputObject ([ordered]@{ Left = $normalized.Left; Top = $normalized.Top; Views = $normalized.Views }) -Depth 4
+        $saved = [ordered]@{ Left = $normalized.Left; Top = $normalized.Top }
+        if ($normalized.ContainsKey('Right')) { $saved.Right = $normalized.Right }
+        $saved.Views = $normalized.Views
+        $json = ConvertTo-Json -InputObject $saved -Depth 4
         [System.IO.File]::WriteAllText($temporary, $json, [System.Text.UTF8Encoding]::new($true))
         if ([System.IO.File]::Exists($target)) {
             # Windows PowerShell requires NullString for File.Replace's optional backup path.

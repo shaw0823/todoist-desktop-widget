@@ -76,7 +76,7 @@ try {
     $fakeFollowPath = Join-Path $fixture 'FollowSettings.ps1'
     [IO.File]::WriteAllText($fakeFollowPath, 'function Get-FollowEnabled { return $false }', [Text.UTF8Encoding]::new($true))
     $source = [IO.File]::ReadAllText((Join-Path $root 'Start.ps1'), [Text.Encoding]::UTF8)
-    foreach ($module in 'Runtime.ps1','Theme.ps1','Background.ps1','Calendar.ps1','FollowSettings.ps1','WindowPosition.ps1','ClockSettings.ps1','DisplaySettings.ps1') {
+    foreach ($module in 'Runtime.ps1','Theme.ps1','Background.ps1','Calendar.ps1','FollowSettings.ps1','WindowPosition.ps1','ClockSettings.ps1','DisplaySettings.ps1','Tray.ps1') {
         $modulePath = $(if ($module -eq 'FollowSettings.ps1') { $fakeFollowPath } else { Join-Path $root $module }).Replace("'", "''")
         $source = $source.Replace("(Join-Path `$PSScriptRoot '$module')", "'$modulePath'")
         $source = $source.Replace("Join-Path `$PSScriptRoot '$module'", "'$modulePath'")
@@ -88,7 +88,7 @@ try {
     $source = $source.Replace($dataAssignment, "`$dataDir = '$($fixture.Replace("'", "''"))'")
     $source = $source.Replace("`$tokenPath = Join-Path `$dataDir 'token.dat'", "`$tokenPath = '$(Join-Path $fixture 'token.dat')'")
     $source = $source.Replace('$window.Add_ContentRendered({ Load-Tasks })', '')
-    $source = $source.Replace('$window.ShowDialog() | Out-Null', '$timer.Stop(); $poll.Stop()')
+    $source = $source.Replace('Start-WidgetMessageLoop -Window $window', '$timer.Stop(); $poll.Stop()')
     Invoke-Expression $source
     Assert-Equal $dataDir $fixture 'UI test stores settings only in the fixture directory'
     Assert-Equal $script:clockFormat '24h' 'Widget starts with a 24-hour clock'

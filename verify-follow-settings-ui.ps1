@@ -148,7 +148,7 @@ function Set-FollowEnabled([bool]$Enabled, [switch]$SkipInitialOpen) {
     [IO.File]::WriteAllText($fakeModulePath, $fakeModule, [Text.UTF8Encoding]::new($true))
     Write-TestFollowState $false
     $source = [IO.File]::ReadAllText((Join-Path $root 'Start.ps1'))
-    foreach ($module in 'Runtime.ps1','Theme.ps1','Background.ps1','Calendar.ps1','FollowSettings.ps1','WindowPosition.ps1','ClockSettings.ps1','DisplaySettings.ps1') {
+    foreach ($module in 'Runtime.ps1','Theme.ps1','Background.ps1','Calendar.ps1','FollowSettings.ps1','WindowPosition.ps1','ClockSettings.ps1','DisplaySettings.ps1','Tray.ps1') {
         $modulePath = $(if ($module -eq 'FollowSettings.ps1') { $fakeModulePath } else { Join-Path $root $module }).Replace("'", "''")
         # Replace imports and worker AddArgument paths together so the async
         # runspace receives the fixture backend as well as the UI thread.
@@ -162,7 +162,7 @@ function Set-FollowEnabled([bool]$Enabled, [switch]$SkipInitialOpen) {
     $fixtureTokenPath = (Join-Path $testDirectory 'token.dat').Replace("'", "''")
     $source = $source.Replace("`$tokenPath = Join-Path `$dataDir 'token.dat'", "`$tokenPath = '$fixtureTokenPath'")
     $source = $source.Replace('Todoist 桌面小组件', 'Todoist 设置测试')
-    $source = $source.Replace('$window.ShowDialog() | Out-Null', '$timer.Stop(); $poll.Stop()')
+    $source = $source.Replace('Start-WidgetMessageLoop -Window $window', '$timer.Stop(); $poll.Stop()')
     Invoke-Expression $source
     Assert-Equal $dataDir $testDirectory 'Test data stays inside the fixture directory'
     Assert-Equal $tokenPath (Join-Path $testDirectory 'token.dat') 'Test token stays inside the fixture directory'

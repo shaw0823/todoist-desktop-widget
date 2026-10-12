@@ -7,6 +7,9 @@ $window = $null
 function Assert-Equal($Actual, $Expected, [string]$Message) {
     if ($Actual -cne $Expected) { throw "$Message (expected $Expected; got $Actual)" }
 }
+function Assert-Near([double]$Actual, [double]$Expected, [string]$Message) {
+    if ([Math]::Abs($Actual - $Expected) -gt 1.5) { throw "$Message (expected about $Expected; got $Actual)" }
+}
 function Click($Control) {
     $event = $(if ($Control -is [Windows.Controls.MenuItem]) { [Windows.Controls.MenuItem]::ClickEvent } else { [Windows.Controls.Primitives.ButtonBase]::ClickEvent })
     $Control.RaiseEvent([Windows.RoutedEventArgs]::new($event))
@@ -31,11 +34,17 @@ function Test-DisplayDialog([string]$Phase) {
             $calendar = $dialog.FindName('ShowCalendar')
             $list = $dialog.FindName('ShowList')
             $clockFormat = $dialog.FindName('ClockFormat')
-            if (!$clock -or !$calendar -or !$list -or !$clockFormat) { throw 'Display controls are missing.' }
+            $expandRight = $dialog.FindName('ExpandRight')
+            $expandLeft = $dialog.FindName('ExpandLeft')
+            if (!$clock -or !$calendar -or !$list -or !$clockFormat -or !$expandRight -or !$expandLeft) { throw 'Display controls are missing.' }
             if ($script:dialogProbe.Phase -eq 'all-off') {
                 Assert-Equal ([bool]$clock.IsChecked) $true 'Clock defaults on'
                 Assert-Equal ([bool]$calendar.IsChecked) $true 'Calendar defaults on'
                 Assert-Equal ([bool]$list.IsChecked) $true 'List defaults on'
+                Assert-Equal ([bool]$expandRight.IsChecked) $true 'Default expansion keeps the left edge'
+                Set-Check $expandLeft $true
+                Assert-Equal $script:displaySettings.ViewExpansionDirection 'RightToLeft' 'Right-to-left choice applies immediately'
+                Assert-Equal (Read-DisplaySettings -Path $displaySettingsPath).ViewExpansionDirection 'RightToLeft' 'Right-to-left choice persists'
 
                 Set-Check $clock $false
                 Assert-Equal $ui.ClockSurface.Visibility ([Windows.Visibility]::Collapsed) 'Clock can be hidden'
@@ -74,12 +83,18 @@ function Test-DisplayDialog([string]$Phase) {
                 Assert-Equal $clockFormat.SelectedIndex 1 'Clock format selection reloads'
                 Assert-Equal ([bool]$calendar.IsChecked) $false 'Calendar checkbox reloads'
                 Assert-Equal ([bool]$list.IsChecked) $false 'List checkbox reloads'
+                Assert-Equal ([bool]$expandLeft.IsChecked) $true 'Right-to-left choice reloads'
                 Set-Check $list $true
                 Assert-Equal $script:viewMode 'List' 'List returns from compact view'
                 Assert-Equal $ui.NoViewsHint.Visibility ([Windows.Visibility]::Collapsed) 'Hint disappears after restoring list'
                 Assert-Equal $ui.DateNavigation.Visibility ([Windows.Visibility]::Visible) 'Navigation returns with list'
                 Set-Check $calendar $true
                 Assert-Equal $ui.ViewToggle.Visibility ([Windows.Visibility]::Visible) 'View switch returns when both views are enabled'
+            } elseif ($script:dialogProbe.Phase -eq 'direction-ltr') {
+                Assert-Equal ([bool]$expandLeft.IsChecked) $true 'Right-to-left choice stays selected until changed'
+                Set-Check $expandRight $true
+                Assert-Equal $script:displaySettings.ViewExpansionDirection 'LeftToRight' 'Left-to-right choice applies immediately'
+                Assert-Equal (Read-DisplaySettings -Path $displaySettingsPath).ViewExpansionDirection 'LeftToRight' 'Left-to-right choice persists'
             } elseif ($script:dialogProbe.Phase -eq 'calendar-only') {
                 Set-Check $list $false
                 Assert-Equal $script:viewMode 'Calendar' 'Calendar remains active when list is disabled'
@@ -105,7 +120,7 @@ function Test-DisplayDialog([string]$Phase) {
 
 try {
     $source = [IO.File]::ReadAllText((Join-Path $root 'Start.ps1'), [Text.Encoding]::UTF8)
-    foreach ($module in 'Runtime.ps1','Theme.ps1','Background.ps1','Calendar.ps1','FollowSettings.ps1','WindowPosition.ps1','ClockSettings.ps1','DisplaySettings.ps1') {
+    foreach ($module in 'Runtime.ps1','Theme.ps1','Background.ps1','Calendar.ps1','FollowSettings.ps1','WindowPosition.ps1','ClockSettings.ps1','DisplaySettings.ps1','Tray.ps1') {
         $modulePath = (Join-Path $root $module).Replace("'", "''")
         $source = $source.Replace(". (Join-Path `$PSScriptRoot '$module')", ". '$modulePath'")
     }
@@ -116,7 +131,7 @@ try {
     $source = $source.Replace($dataAssignment, "`$dataDir = '$($fixture.Replace("'", "''"))'")
     $source = $source.Replace("`$tokenPath = Join-Path `$dataDir 'token.dat'", "`$tokenPath = '$(Join-Path $fixture 'token.dat')'")
     $source = $source.Replace('$window.Add_ContentRendered({ Load-Tasks })', '')
-    $source = $source.Replace('$window.ShowDialog() | Out-Null', '$timer.Stop(); $poll.Stop()')
+    $source = $source.Replace('Start-WidgetMessageLoop -Window $window', '$timer.Stop(); $poll.Stop()')
     Invoke-Expression $source
     Assert-Equal $dataDir $fixture 'UI test uses isolated settings'
     if ([IO.File]::Exists($displaySettingsPath) -or [IO.File]::Exists($tokenPath)) { throw 'Startup wrote display settings or token unexpectedly.' }
@@ -141,8 +156,30 @@ try {
     Assert-Equal $ui.DateNavigation.Visibility ([Windows.Visibility]::Collapsed) 'Restart keeps both task views hidden'
     Assert-Equal $ui.ClockSurface.Visibility ([Windows.Visibility]::Visible) 'Restart preserves independent clock state'
     Test-DisplayDialog 'restore'
+    Add-Type -AssemblyName System.Windows.Forms
+    $handle = [Windows.Interop.WindowInteropHelper]::new($window).Handle
+    $area = [Windows.Forms.Screen]::FromHandle($handle).WorkingArea
+    $dpi = [Windows.PresentationSource]::FromVisual($window)
+    $scaleX = $(if ($dpi) { $dpi.CompositionTarget.TransformToDevice.M11 } else { 1.0 })
+    if ($area.Width / $scaleX -lt 800) { throw 'Display test requires room for the calendar view.' }
+    $window.Left = $area.Right / $scaleX - $window.Width - 20
+    $window.Top = $area.Top / $scaleX + 20
+    $right = $window.Left + $window.Width
     Click $ui.ViewToggle
     Assert-Equal $script:viewMode 'Calendar' 'Calendar still selectable after restoring both views'
+    Assert-Near ($window.Left + $window.Width) $right 'Right-to-left expansion preserves the right edge near the desktop corner'
+    Click $ui.ViewToggle
+    Assert-Equal $script:viewMode 'List' 'List can be restored from the expanded calendar'
+    Assert-Near ($window.Left + $window.Width) $right 'Right-to-left collapse preserves the right edge'
+    Test-DisplayDialog 'direction-ltr'
+    $window.Left = $area.Left / $scaleX + 20
+    $left = $window.Left
+    Click $ui.ViewToggle
+    Assert-Equal $script:viewMode 'Calendar' 'Calendar can expand to the right'
+    Assert-Near $window.Left $left 'Left-to-right expansion preserves the left edge'
+    Click $ui.ViewToggle
+    Assert-Near $window.Left $left 'Left-to-right collapse preserves the left edge'
+    Click $ui.ViewToggle
     Test-DisplayDialog 'calendar-only'
     $script:date = [DateTime]::new(2026, 10, 10)
     Render-Tasks
@@ -152,7 +189,7 @@ try {
     Assert-Equal $script:viewMode 'Calendar' 'Calendar date cannot open a disabled list'
     Assert-Equal (Read-DisplaySettings -Path $displaySettingsPath).ShowList $false 'Final calendar-only choice persists'
     $window.Close()
-    'PASS: themed settings menu, independent clock/calendar/list toggles, compact view, recovery, persistence, and guarded calendar clicks.'
+    'PASS: themed settings menu, independent display toggles, both view expansion directions near screen edges, persistence, compact view, and guarded calendar clicks.'
 } finally {
     if ($window -and $window.IsVisible) { $window.Close() }
     $resolved = [IO.Path]::GetFullPath($fixture)

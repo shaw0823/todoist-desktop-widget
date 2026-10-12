@@ -50,13 +50,20 @@ try {
     Assert-Equal (($bytes[0..2] | ForEach-Object { $_.ToString('X2') }) -join '') 'EFBBBF' 'JSON retains UTF-8 BOM'
     $saved = ConvertFrom-Json ([System.IO.File]::ReadAllText($path))
     Assert-Equal ((@($saved.PSObject.Properties.Name) | Sort-Object) -join ',') 'Left,Top,Views' 'Only placement fields are persisted'
+    Save-WindowPosition @{ Left = 640; Top = 220; Right = 1080; Views = @{ List = @{Width=440; Height=510} } } $path
+    $rightAnchored = Read-WindowPosition $path
+    Assert-Equal $rightAnchored.Right 1080 'Physical right edge is saved for right-anchored reopening'
+    Assert-Equal ((@((ConvertFrom-Json ([System.IO.File]::ReadAllText($path))).PSObject.Properties.Name) | Sort-Object) -join ',') 'Left,Right,Top,Views' 'Right is optional placement data'
     Save-WindowPosition ([pscustomobject]@{ Left = 640.0; Top = 220 }) $path
     Assert-Position (Read-WindowPosition $path) 640 220 'Atomic replacement round-trip'
+    Assert-Equal (Read-WindowPosition $path).ContainsKey('Right') $false 'Older left-only placement stays compatible'
     $beforeFailure = [System.IO.File]::ReadAllText($path)
     foreach ($invalid in @($null, @{}, @{ Left = 0 }, @{ Left = '123'; Top = 0 }, @{ Left = $true; Top = 0 }, @{ Left = 1.5; Top = 0 }, @{ Left = [double]::NaN; Top = 0 }, @{ Left = [double]::PositiveInfinity; Top = 0 }, @{ Left = [int]::MaxValue; Top = 0 }, @{ Left = 0; Top = -1000001 })) {
         Assert-Throws { Save-WindowPosition $invalid $path } 'Invalid position must not be saved'
         Assert-Equal ([System.IO.File]::ReadAllText($path)) $beforeFailure 'Invalid save preserves previous cache'
     }
+    Assert-Throws { Save-WindowPosition @{ Left=640; Top=220; Right='1080' } $path } 'Invalid right edge must be rejected'
+    Assert-Equal ([System.IO.File]::ReadAllText($path)) $beforeFailure 'Invalid right edge preserves previous cache'
     foreach ($badViews in @('invalid', @{List=@{Width='400';Height=460}}, @{List=@{Width=[double]::NaN;Height=460}}, @{List=@{Width=400;Height=0}}, @{List=@{Width=400;Height=10001}})) {
         Assert-Throws { Save-WindowPosition @{Left=640;Top=220;Views=$badViews} $path } 'Invalid view sizes must not be saved'
         Assert-Equal ([System.IO.File]::ReadAllText($path)) $beforeFailure 'Invalid size preserves previous cache'

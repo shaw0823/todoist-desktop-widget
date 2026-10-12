@@ -15,6 +15,7 @@ display.json
 .clock-ui-test-*/
 .display-test-*/
 .display-ui-test-*/
+.tray-ui-test-*/
 *.tmp
 .theme-ui-test-*/
 .background-test-*/

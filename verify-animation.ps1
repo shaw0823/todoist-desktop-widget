@@ -21,6 +21,8 @@ $clockModulePath=(Join-Path $PSScriptRoot 'ClockSettings.ps1').Replace("'", "''"
 $source=$source.Replace(". (Join-Path `$PSScriptRoot 'ClockSettings.ps1')", ". '$clockModulePath'")
 $displayModulePath=(Join-Path $PSScriptRoot 'DisplaySettings.ps1').Replace("'", "''")
 $source=$source.Replace(". (Join-Path `$PSScriptRoot 'DisplaySettings.ps1')", ". '$displayModulePath'")
+$trayModulePath=(Join-Path $PSScriptRoot 'Tray.ps1').Replace("'", "''")
+$source=$source.Replace(". (Join-Path `$PSScriptRoot 'Tray.ps1')", ". '$trayModulePath'")
 $source=$source.Replace("`$backgroundPath = Join-Path `$dataDir 'background.json'", "`$backgroundPath = Join-Path `$dataDir 'animation-test-no-background.json'")
 $source=$source.Replace("`$themePath = Join-Path `$dataDir 'theme.json'", "`$themePath = Join-Path `$dataDir 'animation-test-no-theme.json'")
 $source=$source.Replace('$widgetMutex = Enter-WidgetMutex $widgetMutexName', '$widgetMutex = Enter-WidgetMutex ($widgetMutexName + "-animation-test")')
@@ -30,7 +32,7 @@ $fixtureTokenPath = (Join-Path $testDirectory 'token.dat').Replace("'", "''")
 $source=$source.Replace("`$dataDir = Join-Path `$env:LOCALAPPDATA 'TodoistDesktopWidget'", "`$dataDir = '$fixtureDataPath'")
 $source=$source.Replace("`$tokenPath = Join-Path `$dataDir 'token.dat'", "`$tokenPath = '$fixtureTokenPath'")
 $source=$source.Replace('Todoist 桌面小组件', 'Todoist 动画测试')
-Invoke-Expression ($source.Replace('$window.ShowDialog() | Out-Null','$timer.Stop(); $poll.Stop()'))
+Invoke-Expression ($source.Replace('Start-WidgetMessageLoop -Window $window','$timer.Stop(); $poll.Stop()'))
 if ($dataDir -cne $testDirectory -or $tokenPath -cne (Join-Path $testDirectory 'token.dat') -or ![string]::IsNullOrEmpty($script:token)) { throw 'Animation fixture is not isolated.' }
 $script:token='test-only'
 function Api([string]$method,[string]$path,$body=$null) {

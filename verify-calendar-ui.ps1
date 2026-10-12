@@ -53,7 +53,7 @@ function Assert-NoRequestsSince([int]$Count, [string]$Message) {
 
 try {
     $source = [IO.File]::ReadAllText((Join-Path $PSScriptRoot 'Start.ps1'))
-    foreach ($module in 'Runtime.ps1', 'Theme.ps1', 'Background.ps1', 'Calendar.ps1', 'FollowSettings.ps1','WindowPosition.ps1','ClockSettings.ps1','DisplaySettings.ps1') {
+    foreach ($module in 'Runtime.ps1', 'Theme.ps1', 'Background.ps1', 'Calendar.ps1', 'FollowSettings.ps1','WindowPosition.ps1','ClockSettings.ps1','DisplaySettings.ps1','Tray.ps1') {
         $modulePath = (Join-Path $PSScriptRoot $module).Replace("'", "''")
         $source = $source.Replace(". (Join-Path `$PSScriptRoot '$module')", ". '$modulePath'")
     }
@@ -66,7 +66,7 @@ try {
     $source = $source.Replace($realDataAssignment, "`$dataDir = '$fixtureDataPath'")
     $source = $source.Replace("`$tokenPath = Join-Path `$dataDir 'token.dat'", "`$tokenPath = '$fixtureTokenPath'")
     $source = $source.Replace('Todoist 桌面小组件', 'Todoist 日历测试')
-    $source = $source.Replace('$window.ShowDialog() | Out-Null', '$timer.Stop(); $poll.Stop()')
+    $source = $source.Replace('Start-WidgetMessageLoop -Window $window', '$timer.Stop(); $poll.Stop()')
     Invoke-Expression $source
     Assert-Equal $dataDir $testDirectory 'Fixture uses isolated settings directory'
     Assert-Equal $tokenPath (Join-Path $testDirectory 'token.dat') 'Fixture uses isolated token path'

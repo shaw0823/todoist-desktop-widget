@@ -13,12 +13,19 @@ function Get-DisplaySettingValue {
 
 function Get-NormalizedDisplaySettings {
     param([AllowNull()][object]$Settings)
-    $normalized = @{ ShowClock = $true; ShowCalendar = $true; ShowList = $true }
+    $normalized = @{ ShowClock = $true; ShowCalendar = $true; ShowList = $true; ViewExpansionDirection = 'LeftToRight' }
     foreach ($name in @('ShowClock', 'ShowCalendar', 'ShowList')) {
         $value = Get-DisplaySettingValue $Settings $name
         if ($null -eq $value) { continue }
         if ($value -isnot [bool]) { throw "$name must be true or false." }
         $normalized[$name] = $value
+    }
+    $direction = Get-DisplaySettingValue $Settings 'ViewExpansionDirection'
+    if ($null -ne $direction) {
+        if ($direction -isnot [string] -or $direction -cnotin @('LeftToRight', 'RightToLeft')) {
+            throw 'ViewExpansionDirection must be LeftToRight or RightToLeft.'
+        }
+        $normalized.ViewExpansionDirection = $direction
     }
     return $normalized
 }
@@ -51,6 +58,7 @@ function Save-DisplaySettings {
             ShowClock = $normalized.ShowClock
             ShowCalendar = $normalized.ShowCalendar
             ShowList = $normalized.ShowList
+            ViewExpansionDirection = $normalized.ViewExpansionDirection
         } | ConvertTo-Json -Compress
         [IO.File]::WriteAllText($temporary, $json, [Text.UTF8Encoding]::new($true))
         if ([IO.File]::Exists($target)) {
