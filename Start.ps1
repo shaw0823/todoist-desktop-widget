@@ -17,6 +17,12 @@ $tokenPath = Join-Path $dataDir 'token.dat'
 . (Join-Path $PSScriptRoot 'WindowPosition.ps1')
 . (Join-Path $PSScriptRoot 'ClockSettings.ps1')
 . (Join-Path $PSScriptRoot 'DisplaySettings.ps1')
+. (Join-Path $PSScriptRoot 'History.ps1')
+. (Join-Path $PSScriptRoot 'HistoryUI.ps1')
+. (Join-Path $PSScriptRoot 'OfflineTasks.ps1')
+. (Join-Path $PSScriptRoot 'Reminders.ps1')
+. (Join-Path $PSScriptRoot 'ReminderPopup.ps1')
+. (Join-Path $PSScriptRoot 'TaskWorkflow.ps1')
 $windowPositionPath = Join-Path $dataDir 'window-position.json'
 $clockSettingsPath = Join-Path $dataDir 'clock.json'
 $script:clockFormat = (Read-ClockSettings -Path $clockSettingsPath).Format
@@ -52,6 +58,13 @@ function Save-Token([string]$value) {
     $encrypted = [Security.Cryptography.ProtectedData]::Protect($bytes,$null,[Security.Cryptography.DataProtectionScope]::CurrentUser)
     [IO.File]::WriteAllBytes($tokenPath,$encrypted)
     $script:token = $value
+    $script:revision++
+    $script:busy = $false
+    $script:historyRequestId++
+    Initialize-TaskWorkflow
+    Render-Tasks
+    if ($null -ne $script:historyWindow) { Load-CompletedHistory }
+    Start-NextOfflineSync
 }
 if (Test-Path $tokenPath) {
     try { $script:token = [Text.Encoding]::UTF8.GetString([Security.Cryptography.ProtectedData]::Unprotect([IO.File]::ReadAllBytes($tokenPath),$null,[Security.Cryptography.DataProtectionScope]::CurrentUser)) } catch {}
@@ -141,6 +154,7 @@ if (Test-Path $tokenPath) {
          </ContextMenu.Resources>
          <MenuItem x:Name="AppearanceMenuItem" Header="外观" ToolTip="颜色、壁纸和透明度"/>
          <MenuItem x:Name="DisplayMenuItem" Header="显示内容" ToolTip="时间及格式、月历和列表开关"/>
+         <MenuItem x:Name="HistoryMenuItem" Header="已完成历史" ToolTip="按实际完成日期查看历史"/>
          <MenuItem x:Name="SettingsMenuItem" Header="关联" ToolTip="Todoist 连接与启动联动"/>
         </ContextMenu>
        </Button.ContextMenu>
@@ -184,7 +198,8 @@ $ui = @{}
 'Header','ClockSurface','Clock','MenuButton','Pin','Refresh','Close','DateNavigation','Previous','Day','Next','ViewToggle','Input','Status','Tasks','ListView','CalendarView','CalendarDays','NoViewsHint','ResizeHandle','WidgetFrame','BackgroundLayer','BackgroundFill','WallpaperOverlay' | ForEach-Object { $ui[$_] = $window.FindName($_) }
 $ui.AppearanceMenuItem = $ui.MenuButton.ContextMenu.Items[0]
 $ui.DisplayMenuItem = $ui.MenuButton.ContextMenu.Items[1]
-$ui.SettingsMenuItem = $ui.MenuButton.ContextMenu.Items[2]
+$ui.HistoryMenuItem = $ui.MenuButton.ContextMenu.Items[2]
+$ui.SettingsMenuItem = $ui.MenuButton.ContextMenu.Items[3]
 $window.Width = $script:viewSizes.List.Width
 $window.Height = $script:viewSizes.List.Height
 function Save-WidgetPosition {
@@ -321,6 +336,7 @@ function Apply-Theme($value) {
     }
     $script:theme = $normalized
     Apply-Background $script:backgroundSettings
+    Set-CompletedHistoryTheme -Theme $normalized
 }
 Apply-Theme $script:theme
 $ui.ResizeHandle.Add_DragDelta({
@@ -339,12 +355,22 @@ function Api([string]$method,[string]$path,$body = $null) {
     try { $json = $reader.ReadToEnd() } finally { $reader.Dispose() }
     if (![string]::IsNullOrWhiteSpace($json)) { $json | ConvertFrom-Json }
 }
+function SyncApi($commands) {
+    $json = ConvertTo-Json -InputObject @($commands) -Depth 25 -Compress
+    $form = 'commands=' + [Uri]::EscapeDataString($json)
+    $response = Invoke-WebRequest -Uri 'https://api.todoist.com/api/v1/sync' -Method Post -Headers @{Authorization="Bearer $script:token"} -ContentType 'application/x-www-form-urlencoded; charset=utf-8' -Body ([Text.Encoding]::UTF8.GetBytes($form)) -TimeoutSec 15 -UseBasicParsing
+    $stream = $response.RawContentStream
+    $stream.Position = 0
+    $reader = [IO.StreamReader]::new($stream, [Text.Encoding]::UTF8, $true)
+    try { $result = $reader.ReadToEnd() } finally { $reader.Dispose() }
+    if (![string]::IsNullOrWhiteSpace($result)) { $result | ConvertFrom-Json }
+}
 function Show-Error($errorRecord) {
     $ui.Status.Text = '同步失败，请检查网络和 API Token。' + $errorRecord.Exception.Message
 }
 function Start-Request($kind, $method, $path, $body, $context) {
     $worker = [PowerShell]::Create()
-    $code = 'param($token,$kind,$method,$path,$body) $ErrorActionPreference="Stop"; $script:token=$token; function Api {' + ${function:Api}.ToString() + '}; if ($kind -eq "Load") { $all=@(); $cursor=$null; do { $url="tasks?limit=200"; if ($cursor) { $url += "&cursor=" + [Uri]::EscapeDataString($cursor) }; $result=Api "Get" $url; $all+=@($result.results); $cursor=$result.next_cursor } while ($cursor); $all } else { Api $method $path $body }'
+    $code = 'param($token,$kind,$method,$path,$body) $ErrorActionPreference="Stop"; $script:token=$token; function Api {' + ${function:Api}.ToString() + '}; function SyncApi {' + ${function:SyncApi}.ToString() + '}; if ($kind -eq "Load") { $all=@(); $cursor=$null; do { $url="tasks?limit=200"; if ($cursor) { $url += "&cursor=" + [Uri]::EscapeDataString($cursor) }; $result=Api "Get" $url; $all+=@($result.results); $cursor=$result.next_cursor } while ($cursor); $all } elseif ($kind -eq "History") { $all=@(); $cursor=$null; do { $url=$path; if ($cursor) { $url += "&cursor=" + [Uri]::EscapeDataString($cursor) }; $result=Api "Get" $url; $all+=@($result.items); $cursor=$result.next_cursor } while ($cursor); $all } elseif ($kind -eq "Sync") { SyncApi $body } else { Api $method $path $body }'
     $worker.AddScript($code).AddArgument($script:token).AddArgument($kind).AddArgument($method).AddArgument($path).AddArgument($body) | Out-Null
     $handle=$worker.BeginInvoke()
     $script:jobs.Add(@{Worker=$worker; Handle=$handle; Kind=$kind; Context=$context})
@@ -352,6 +378,14 @@ function Start-Request($kind, $method, $path, $body, $context) {
 function Animate-Complete($check) {
     $state=$check.Tag
     if ($script:pending.ContainsKey($state.Id)) { return }
+    if ($null -eq $script:offlineContext -or [string]$state.Id -like 'offline-*') { $check.IsChecked=$false; return }
+    try {
+        $due = Get-CalendarObjectValue $state.Task 'due'
+        $originalDue = [string](Get-CalendarObjectValue $due 'date')
+        $completedCount = Get-CalendarObjectValue $state.Task 'completed_count'
+        if ($null -eq $completedCount) { $completedCount = 0 }
+        Add-OfflineTaskOperation -Context $script:offlineContext -Kind Close -TaskId ([string]$state.Id) -OriginalDue $originalDue -OriginalCompletedCount ([int]$completedCount) | Out-Null
+    } catch { $check.IsChecked=$false; $ui.Status.Text='保存完成状态失败：' + $_.Exception.Message; return }
     $script:pending[$state.Id]=$state
     $script:revision++
     $check.IsEnabled=$false
@@ -359,13 +393,14 @@ function Animate-Complete($check) {
     $state.Label.SetResourceReference([Windows.Controls.TextBlock]::ForegroundProperty, 'WidgetAccent')
     $fade=[Windows.Media.Animation.DoubleAnimation]::new(1,0.45,[TimeSpan]::FromMilliseconds(220))
     $state.Border.BeginAnimation([Windows.UIElement]::OpacityProperty,$fade)
-    $ui.Status.Text='正在后台同步完成状态…'
-    Start-Request 'Close' 'Post' ('tasks/' + $state.Id + '/close') $null $state
+    $ui.Status.Text='已完成，正在后台同步…'
+    Update-TaskProjection
+    $script:jobs.Add(@{Kind='Remove'; Context=$state; Deadline=[DateTime]::Now.AddMilliseconds(320)})
+    Start-NextOfflineSync
 }
 function Load-Tasks {
     Render-Tasks
-    if ($script:viewMode -eq 'Minimal') { return }
-    if ($script:busy -or $script:pending.Count) { return }
+    if ($script:busy) { return }
     if (!$script:token) { $ui.Status.Text='点击 ⚙ 输入 Todoist API Token 以连接账号。'; return }
     $script:busy=$true
     $ui.Status.Text='正在同步…'
@@ -380,13 +415,13 @@ function Copy-TaskToToday($button) {
     if (!$script:token) { $ui.Status.Text = '请先在 ⚙ → 关联 中连接 Todoist。'; return }
     try {
         $body = New-TodayCopyRequestBody -Task $state.Task -Today ([DateTime]::Today)
-        $script:copyPending[$key] = $true
-        $button.IsEnabled = $false
-        $button.Content = '复制中…'
-        $ui.Status.Text = '正在复制这条待办到今天…'
-        Start-Request 'Copy' 'Post' 'tasks' $body $state
+        Add-OfflineTaskOperation -Context $script:offlineContext -Kind Copy -Payload $body -SourceId ([string]$state.Task.id) -TargetDate ([DateTime]::Today.ToString('yyyy-MM-dd')) | Out-Null
+        Update-TaskProjection
+        $script:revision++
+        Render-Tasks
+        $ui.Status.Text = '已复制到本机，正在后台同步…'
+        Start-NextOfflineSync
     } catch {
-        $script:copyPending.Remove($key)
         $button.IsEnabled = $true
         $button.Content = '复制到今天'
         $ui.Status.Text = '复制失败：' + $_.Exception.Message
@@ -418,6 +453,7 @@ function Render-DailyTasks {
             $row = New-Object Windows.Controls.DockPanel
             $check = New-Object Windows.Controls.CheckBox
             $check.Margin='0,2,10,0'; $check.ToolTip='完成任务并同步到 Todoist'
+            if ([string]$task.id -like 'offline-*') { $check.IsEnabled=$false; $check.ToolTip='等待同步后可完成这条待办' }
             $check.Add_Click({ Animate-Complete $this })
             $row.Children.Add($check) | Out-Null
             if ($selected -ne [DateTime]::Today.ToString('yyyy-MM-dd', [Globalization.CultureInfo]::InvariantCulture)) {
@@ -438,13 +474,14 @@ function Render-DailyTasks {
             }
             $label = New-Object Windows.Controls.TextBlock
             $label.Text=$task.content; $label.TextWrapping='Wrap'; $label.FontSize=13
+            if ([string]$task.id -like 'offline-*') { $label.Text += '  · 待同步' }
             $label.SetResourceReference([Windows.Controls.TextBlock]::ForegroundProperty, 'WidgetForeground')
             $check.Tag=@{Id=$task.id; Border=$border; Label=$label; Check=$check; Task=$task}
             $row.Children.Add($label) | Out-Null
             $border.Child=$row; $ui.Tasks.Children.Add($border) | Out-Null
         }
         $remaining = @($items | Where-Object { !$script:pending.ContainsKey($_.id) }).Count
-        $ui.Status.Text = "共 $remaining 项 · 同步于 $([DateTime]::Now.ToString('HH:mm')) · 每分钟刷新"
+        $ui.Status.Text = "共 $remaining 项 · 每分钟刷新" + (Get-TaskSyncStatusSuffix)
 }
 function Render-Calendar {
     $days = @(Get-CalendarDays $script:date)
@@ -554,7 +591,7 @@ function Render-Calendar {
         $cell.Add_Click({ if ($script:displaySettings.ShowList) { $script:date = [DateTime]$this.Tag; Set-WidgetView 'List' } })
         $ui.CalendarDays.Children.Add($cell) | Out-Null
     }
-    $ui.Status.Text = "本月 $monthCount 项 · $(if ($script:displaySettings.ShowList) { '点击日期查看任务 · ' } else { '' })每分钟刷新"
+    $ui.Status.Text = "本月 $monthCount 项 · $(if ($script:displaySettings.ShowList) { '点击日期查看任务 · ' } else { '' })每分钟刷新" + (Get-TaskSyncStatusSuffix)
 }
 function Render-Tasks {
     if ($script:viewMode -eq 'Minimal') {
@@ -1045,6 +1082,7 @@ $ui.MenuButton.Add_Click({
 })
 $ui.AppearanceMenuItem.Add_Click({ $ui.MenuButton.ContextMenu.IsOpen = $false; Configure-Theme })
 $ui.DisplayMenuItem.Add_Click({ $ui.MenuButton.ContextMenu.IsOpen = $false; Configure-Display })
+$ui.HistoryMenuItem.Add_Click({ $ui.MenuButton.ContextMenu.IsOpen = $false; Show-CompletedHistory -Theme $script:theme })
 $ui.SettingsMenuItem.Add_Click({ $ui.MenuButton.ContextMenu.IsOpen = $false; Configure })
 $ui.Pin.Add_Click({ $window.Topmost = !$window.Topmost; $ui.Pin.Opacity = $(if ($window.Topmost) {1} else {0.45}) })
 $ui.Close.Add_Click({ Hide-WidgetToTray })
@@ -1057,7 +1095,16 @@ $ui.Input.Add_KeyDown({
     if ($_.Key -eq 'Return' -and $ui.Input.Text.Trim() -and $script:token) {
         if (!$ui.Input.IsEnabled) { return }
         $ui.Input.IsEnabled=$false
-        Start-Request 'Add' 'Post' 'tasks' @{content=$ui.Input.Text.Trim(); due_date=$script:date.ToString('yyyy-MM-dd')} $null
+        try {
+            $dateKey = $script:date.ToString('yyyy-MM-dd', [Globalization.CultureInfo]::InvariantCulture)
+            Add-OfflineTaskOperation -Context $script:offlineContext -Kind Add -Payload @{content=$ui.Input.Text.Trim(); due_date=$dateKey} -TargetDate $dateKey | Out-Null
+            $ui.Input.Clear()
+            $script:revision++
+            Update-TaskProjection
+            Render-Tasks
+            Start-NextOfflineSync
+        } catch { $ui.Status.Text = '新增待办保存失败：' + $_.Exception.Message }
+        finally { $ui.Input.IsEnabled=$true }
     }
 })
 $poll=New-Object Windows.Threading.DispatcherTimer
@@ -1082,49 +1129,31 @@ $poll.Add_Tick({
         switch ($job.Kind) {
             'Load' {
                 $script:busy=$false
-                if (!$failure -and $job.Context -eq $script:revision -and !$script:pending.Count) {
-                    $script:cachedTasks=$output
+                if (!$failure -and $job.Context -eq $script:revision) {
+                    try {
+                        if ($null -ne $script:offlineContext) { Set-OfflineTaskSnapshot -Context $script:offlineContext -Tasks $output }
+                        else { $script:cachedTasks = @($output) }
+                        $script:lastLoadFailed=$false
+                        if ($null -ne $script:offlineContext) { Update-TaskProjection }
+                        Render-Tasks
+                        Check-TaskReminders
+                        Start-NextOfflineSync
+                    } catch { $ui.Status.Text='本机缓存保存失败：' + $_.Exception.Message }
+                } elseif (!$failure) { Load-Tasks }
+                else {
+                    $script:lastLoadFailed=$true
                     Render-Tasks
-                } elseif (!$failure -and !$script:pending.Count) { Load-Tasks }
-            }
-            'Close' {
-                $state=$job.Context
-                if ($failure) {
-                    $script:pending.Remove($state.Id)
-                    $state.Border.BeginAnimation([Windows.UIElement]::OpacityProperty,$null)
-                    $state.Check.IsChecked=$false; $state.Check.IsEnabled=$true
-                    $state.Label.TextDecorations=$null
-                    $state.Label.SetResourceReference([Windows.Controls.TextBlock]::ForegroundProperty, 'WidgetForeground')
-                    Render-Tasks
-                } else {
-                    $script:cachedTasks=@($script:cachedTasks | Where-Object { $_.id -ne $state.Id })
-                    $state.Border.ClipToBounds=$true
-                    $height=[Windows.Media.Animation.DoubleAnimation]::new($state.Border.ActualHeight,0,[TimeSpan]::FromMilliseconds(280))
-                    $height.EasingFunction=[Windows.Media.Animation.CubicEase]::new()
-                    $state.Border.BeginAnimation([Windows.FrameworkElement]::HeightProperty,$height)
-                    $fade=[Windows.Media.Animation.DoubleAnimation]::new(0.45,0,[TimeSpan]::FromMilliseconds(200))
-                    $state.Border.BeginAnimation([Windows.UIElement]::OpacityProperty,$fade)
-                    $script:jobs.Add(@{Kind='Remove'; Context=$state; Deadline=[DateTime]::Now.AddMilliseconds(300)})
+                    $ui.Status.Text='无法连接 Todoist，正在显示本机缓存。' + (Get-TaskSyncStatusSuffix)
                 }
             }
-            'Add' {
-                $ui.Input.IsEnabled=$true
-                if (!$failure) { $ui.Input.Clear(); $script:revision++; Load-Tasks }
-            }
-            'Copy' {
-                $state = $job.Context
-                $script:copyPending.Remove([string]$state.Key)
-                if ($failure) {
-                    Render-Tasks
-                    $ui.Status.Text = '复制失败，请重试：' + $failure.Exception.Message
+            'Sync' { Complete-TaskSyncJob -Job $job -Failure $failure -Output $output }
+            'History' {
+                $local = @(Get-LocalPendingHistory -Date $job.Context.Date)
+                if ($null -ne $failure -and !$local.Count) {
+                    Update-CompletedHistory -Context $job.Context -Items @() -ErrorRecord $failure
                 } else {
-                    $script:copiedToday[[string]$state.Key] = $true
-                    if ($output.Count -and $null -ne (Get-CalendarObjectValue $output[-1] 'id')) {
-                        $script:cachedTasks += $output[-1]
-                    }
-                    $script:revision++
-                    Load-Tasks
-                    $ui.Status.Text = '已把这一条待办复制到今天。'
+                    Update-CompletedHistory -Context $job.Context -Items (@($output) + $local) -ErrorRecord $null
+                    if ($null -ne $failure -and $null -ne $script:historyUi -and $job.Context.RequestId -eq $script:historyRequestId -and $job.Context.Date -eq $script:historyDate) { $script:historyUi.HistoryStatus.Text += ' · 离线仅显示待同步的完成记录' }
                 }
             }
             'Follow' {
@@ -1143,7 +1172,7 @@ $poll.Add_Tick({
                 }
             }
         }
-        if ($failure -and $job.Kind -ne 'Follow' -and $job.Kind -ne 'Copy') { Show-Error $failure }
+        if ($failure -and $job.Kind -notin @('Follow','Load','Sync','History')) { Show-Error $failure }
     }
 })
 $poll.Start()
@@ -1153,8 +1182,10 @@ $clockTimer.Add_Tick({ Update-ClockDisplay })
 Update-ClockDisplay
 $clockTimer.Start()
 $timer=New-Object Windows.Threading.DispatcherTimer
-$timer.Interval=[TimeSpan]::FromMinutes(1); $timer.Add_Tick({ Load-Tasks }); $timer.Start()
-$window.Add_ContentRendered({ Load-Tasks })
+$timer.Interval=[TimeSpan]::FromMinutes(1); $timer.Add_Tick({ Load-Tasks; Start-NextOfflineSync; Check-TaskReminders }); $timer.Start()
+$reminderTimer = [Windows.Threading.DispatcherTimer]::new()
+$reminderTimer.Interval=[TimeSpan]::FromSeconds(15); $reminderTimer.Add_Tick({ Check-TaskReminders; Start-NextOfflineSync }); $reminderTimer.Start()
+$window.Add_ContentRendered({ Initialize-TaskWorkflow; Render-Tasks; Load-Tasks; Start-NextOfflineSync; Check-TaskReminders })
 $positionSaveTimer = [Windows.Threading.DispatcherTimer]::new()
 $positionSaveTimer.Interval = [TimeSpan]::FromMilliseconds(400)
 $positionSaveTimer.Add_Tick({ $this.Stop(); Save-WidgetPosition })
@@ -1175,7 +1206,9 @@ $window.Add_Closing({ $positionSaveTimer.Stop(); Save-WidgetPosition })
 $window.Add_Closed({
     $positionSaveTimer.Stop()
     $script:positionReady = $false
-    $timer.Stop(); $poll.Stop(); $clockTimer.Stop()
+    $timer.Stop(); $poll.Stop(); $clockTimer.Stop(); $reminderTimer.Stop()
+    Close-ReminderPopup $script:reminderPopup
+    if ($null -ne $script:historyWindow) { $script:historyWindow.Close() }
     foreach ($job in $script:jobs) { if ($job.Worker) { $job.Worker.Stop(); $job.Worker.Dispose() } }
     Dispose-WidgetTray
     if ($script:trayLoopRunning -and !$window.Dispatcher.HasShutdownStarted) {

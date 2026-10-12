@@ -1,13 +1,13 @@
 # Todoist Widget
 
-Todoist Widget 是一个基于 Todoist 官方 API 的第三方独立 Windows 任务应用。Todoist 提供任务数据和同步服务，应用提供每日列表、完整月历、任务添加与完成、悬浮置顶、实时时钟，以及自定义颜色、壁纸和透明背景。
+Todoist Widget 是一个基于 Todoist 官方 API 的第三方独立 Windows 任务应用。Todoist 提供任务数据和同步服务，应用提供每日列表、完整月历、已完成历史、离线任务操作、到期提醒、悬浮置顶、实时时钟，以及自定义颜色、壁纸和透明背景。
 
 应用可直接通过桌面快捷方式启动。连接 Todoist 账号后，无需打开 Todoist 桌面客户端，也能读取和同步任务；跟随 Todoist 启动是可选功能。
 
 ## 环境要求
 
 - Windows 10 / 11，Windows PowerShell 5.1 与系统自带 WPF。
-- 一个 Todoist 账号与网络连接。
+- 一个 Todoist 账号；首次获取任务和读取已完成历史需要网络连接。
 - 如需启动联动，安装 Todoist Windows 桌面客户端；联动不检测浏览器中的 Todoist 网页。
 
 不需要安装 Python、Node.js 或其他运行环境。
@@ -28,10 +28,18 @@ Todoist Widget 是一个基于 Todoist 官方 API 的第三方独立 Windows 任
 - 深青色界面，拖动标题移动窗口，右下角调整大小。
 - 图钉切换窗口置顶，箭头切换日期，点击日期返回今天。
 - 显示当前日期的未完成任务，每分钟刷新。
-- 勾选后立即变色并显示删除线，后台同步成功后淡出收起；同步失败会恢复任务。循环任务由 Todoist 推进到下一次日期。
+- 勾选后立即变色并显示删除线，随后淡出收起；断网时完成状态保存在本机，恢复连接后自动同步。循环任务由 Todoist 推进到下一次日期。
 - 输入任务内容并回车，添加到所选日期。
 - 浏览非今天的列表时，可在每条未完成待办右侧点 **复制到今天**，逐条挑选需要重做的任务。复制会新建一条今天到期的待办，原待办仍保留；已完成待办不会显示在列表中。标题、描述、项目、分区、标签和优先级会保留；有时间的待办沿用本机时钟上的相同时间。循环规则和原父任务关系不会复制。复制中按钮暂时禁用，成功后显示“已复制”，避免连续点出重复项。
 - Token 使用 Windows DPAPI 当前用户加密，保存在 `%LOCALAPPDATA%\TodoistDesktopWidget\token.dat`。
+
+## 已完成历史、离线操作与提醒
+
+点击 **⚙ → 已完成历史**，可按实际完成日期查看任务和本地完成时间。历史记录由 Todoist 提供，查看时需要联网。
+
+成功连接一次后，应用会保留本机任务缓存。断网时仍可浏览缓存、添加待办、逐条复制待办和勾选完成；这些操作立即写入本机队列，恢复连接后自动同步。待同步和被 Todoist 拒绝的数量会显示在列表状态栏。同步时使用固定的操作 ID 重试，避免重复创建；账号切换时使用各自独立的缓存和队列。尚未同步的新任务会标记“待同步”，同步成功前不能勾选它。任务缓存和队列保存在 `%LOCALAPPDATA%\TodoistDesktopWidget\offline-*.json`，包含任务标题等内容，仅供本机当前用户使用；请勿随意删除待同步文件。
+
+有具体时间的待办会在到点时弹出提醒；只有日期的全天待办在当天 **09:00** 提醒。弹窗可逐条选择“稍后 10 分钟”或“知道了”。小组件隐藏到系统托盘时仍会提醒；完全退出应用后不会弹窗。无到期日期的待办不会提醒。提醒状态保存在本机，避免重启后重复弹出。
 
 ## 顶部时钟
 
@@ -85,7 +93,7 @@ Todoist Widget 是一个基于 Todoist 官方 API 的第三方独立 Windows 任
 
 `启用联动.cmd` 和 `取消联动.cmd` 保留为手动维护入口，日常使用直接在应用的关联页操作。
 
-网络请求在后台执行，不阻塞界面；无网络时保留已有列表并显示错误。
+网络请求在后台执行，不阻塞界面；无网络时保留已有列表，新增、复制和完成操作会等待同步。
 
 ## 系统托盘
 
@@ -100,7 +108,8 @@ Todoist Widget 是一个基于 Todoist 官方 API 的第三方独立 Windows 任
 ## 当前限制
 
 - 应用采用无系统边框的悬浮窗口，未嵌入桌面背景层。
-- 未实现已完成历史、离线操作与提醒弹窗。
+- 已完成历史需联网读取；离线浏览依赖此前成功同步过的任务缓存。
+- 提醒只在应用运行时弹出，完全退出后不会由系统代发。
 
 ## 本地验证
 
@@ -125,6 +134,11 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\verify-display-setting
 powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File .\verify-display-ui.ps1
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\verify-task-copy.ps1
 powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File .\verify-task-copy-ui.ps1
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\verify-history.ps1
+powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File .\verify-history-ui.ps1
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\verify-offline-tasks.ps1
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\verify-reminders.ps1
+powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File .\verify-reminder-popup.ps1
 ```
 
 测试使用模拟网络响应和进程状态，不读取真实 API Token，也不会调用 Todoist API。动画测试会短暂显示一个测试窗口。

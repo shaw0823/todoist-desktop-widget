@@ -7,7 +7,7 @@ $window = $null
 
 try {
     $source = [IO.File]::ReadAllText((Join-Path $root 'Start.ps1'), [Text.Encoding]::UTF8)
-    $modules = @('Runtime.ps1','Tray.ps1','Theme.ps1','Background.ps1','Calendar.ps1','TaskCopy.ps1','FollowSettings.ps1','WindowPosition.ps1','ClockSettings.ps1','DisplaySettings.ps1')
+    $modules = @('Runtime.ps1','Tray.ps1','Theme.ps1','Background.ps1','Calendar.ps1','TaskCopy.ps1','FollowSettings.ps1','WindowPosition.ps1','ClockSettings.ps1','DisplaySettings.ps1','History.ps1','HistoryUI.ps1','OfflineTasks.ps1','Reminders.ps1','ReminderPopup.ps1','TaskWorkflow.ps1')
     foreach ($module in $modules) {
         $modulePath = (Join-Path $root $module).Replace("'", "''")
         $source = $source.Replace(". (Join-Path `$PSScriptRoot '$module')", ". '$modulePath'")
@@ -72,6 +72,7 @@ $trayProbe.Start()
 Start-WidgetMessageLoop -Window $window
 '@
     $source = $source.Replace('Start-WidgetMessageLoop -Window $window', $probe)
+    $source = $source.Replace('$window.Add_ContentRendered({ Initialize-TaskWorkflow; Render-Tasks; Load-Tasks; Start-NextOfflineSync; Check-TaskReminders })', '')
     Invoke-Expression $source
     if ($script:trayProbeError) { throw $script:trayProbeError }
     if ($script:trayProbeStep -ne 5) { throw "Tray flow stopped at step $script:trayProbeStep." }

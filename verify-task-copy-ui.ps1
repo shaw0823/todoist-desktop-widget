@@ -2,9 +2,10 @@
 $root = [IO.Path]::GetFullPath($PSScriptRoot).TrimEnd('\')
 $folderName = '.task-copy-ui-test-' + [Guid]::NewGuid().ToString('N')
 $testDirectory = Join-Path $root $folderName
-$null = [IO.Directory]::CreateDirectory($testDirectory)
+[IO.Directory]::CreateDirectory($testDirectory) | Out-Null
 $window = $null
 
+function Assert($Condition, [string]$Message) { if (!$Condition) { throw $Message } }
 function Assert-Equal($Actual, $Expected, [string]$Message) {
     if ($Actual -cne $Expected) { throw "$Message (expected $Expected; got $Actual)" }
 }
@@ -17,108 +18,139 @@ function Pump([int]$Milliseconds) {
     $end.Start()
     try { [Windows.Threading.Dispatcher]::PushFrame($frame) } finally { $end.Stop() }
 }
-function Get-CopyButton([int]$Index) { $ui.Tasks.Children[$Index].Child.Children[1] }
 function Find-CopyButton([string]$Title) {
     foreach ($row in $ui.Tasks.Children) {
         if ($row.Child.Children[2].Text -ceq $Title) { return $row.Child.Children[1] }
     }
     throw "Missing task row: $Title"
 }
-function Click-Copy($Button) {
-    $Button.RaiseEvent([Windows.RoutedEventArgs]::new([Windows.Controls.Button]::ClickEvent))
+function Click-Button($Button) {
+    $Button.RaiseEvent([Windows.RoutedEventArgs]::new([Windows.Controls.Primitives.ButtonBase]::ClickEvent))
+}
+function Press-Return($TextBox) {
+    $source = [Windows.PresentationSource]::FromVisual($TextBox)
+    if ($null -eq $source) { throw 'The input has no presentation source.' }
+    $key = [Windows.Input.KeyEventArgs]::new([Windows.Input.Keyboard]::PrimaryDevice, $source, [Environment]::TickCount, [Windows.Input.Key]::Return)
+    $key.RoutedEvent = [Windows.Input.Keyboard]::KeyDownEvent
+    $TextBox.RaiseEvent($key)
 }
 
 try {
-    $source = [IO.File]::ReadAllText((Join-Path $PSScriptRoot 'Start.ps1'))
-    foreach ($module in 'Runtime.ps1','Tray.ps1','Theme.ps1','Background.ps1','Calendar.ps1','TaskCopy.ps1','FollowSettings.ps1','WindowPosition.ps1','ClockSettings.ps1','DisplaySettings.ps1') {
-        $path = (Join-Path $PSScriptRoot $module).Replace("'", "''")
-        $source = $source.Replace(". (Join-Path `$PSScriptRoot '$module')", ". '$path'")
+    $source = [IO.File]::ReadAllText((Join-Path $root 'Start.ps1'), [Text.Encoding]::UTF8)
+    foreach ($module in @('Runtime.ps1','Tray.ps1','Theme.ps1','Background.ps1','Calendar.ps1','TaskCopy.ps1','FollowSettings.ps1','WindowPosition.ps1','ClockSettings.ps1','DisplaySettings.ps1','History.ps1','HistoryUI.ps1','OfflineTasks.ps1','Reminders.ps1','ReminderPopup.ps1','TaskWorkflow.ps1')) {
+        $needle = ". (Join-Path " + '$PSScriptRoot' + " '$module')"
+        Assert ($source.Contains($needle)) "Module location changed: $module"
+        $source = $source.Replace($needle, ". '$(Join-Path $root $module)'")
     }
     $source = $source.Replace('$widgetMutex = Enter-WidgetMutex $widgetMutexName', '$widgetMutex = Enter-WidgetMutex ($widgetMutexName + "-task-copy-ui-test")')
     $source = $source.Replace('if (Test-WidgetOpen) { return }', '')
-    $realDataAssignment = "`$dataDir = Join-Path `$env:LOCALAPPDATA 'TodoistDesktopWidget'"
-    if (!$source.Contains($realDataAssignment)) { throw 'Cannot isolate widget settings.' }
-    $fixtureDataPath = $testDirectory.Replace("'", "''")
-    $fixtureTokenPath = (Join-Path $testDirectory 'token.dat').Replace("'", "''")
-    $source = $source.Replace($realDataAssignment, "`$dataDir = '$fixtureDataPath'")
-    $source = $source.Replace("`$tokenPath = Join-Path `$dataDir 'token.dat'", "`$tokenPath = '$fixtureTokenPath'")
-    $source = $source.Replace('Todoist 桌面小组件', 'Todoist 复制测试')
-    $source = $source.Replace('Start-WidgetMessageLoop -Window $window', '$timer.Stop(); $poll.Stop()')
+    $realDataAssignment = '$dataDir = Join-Path $env:LOCALAPPDATA ''TodoistDesktopWidget'''
+    Assert ($source.Contains($realDataAssignment)) 'Cannot isolate widget settings.'
+    $source = $source.Replace($realDataAssignment, ('$dataDir = ' + "'" + $testDirectory.Replace("'", "''") + "'"))
+    $source = $source.Replace('$tokenPath = Join-Path $dataDir ''token.dat''', ('$tokenPath = ' + "'" + (Join-Path $testDirectory 'token.dat').Replace("'", "''") + "'"))
+    $source = $source.Replace('$window.Add_ContentRendered({ Initialize-TaskWorkflow; Render-Tasks; Load-Tasks; Start-NextOfflineSync; Check-TaskReminders })', '')
+    $source = $source.Replace('Start-WidgetMessageLoop -Window $window', '$timer.Stop(); $poll.Stop(); $clockTimer.Stop(); $reminderTimer.Stop()')
     Invoke-Expression $source
     Assert-Equal $dataDir $testDirectory 'Test settings are isolated'
     Assert-Equal $script:token '' 'Test did not read a real API token'
 
     $script:testRequests = [Collections.Generic.List[object]]::new()
-    $script:failNext = $false
     function Start-Request($Kind, $Method, $Path, $Body, $Context) {
-        $script:testRequests.Add(@{Kind=$Kind; Method=$Method; Path=$Path; Body=$Body})
+        $script:testRequests.Add(@{Kind=$Kind; Method=$Method; Path=$Path; Body=$Body; Context=$Context})
         $worker = [PowerShell]::Create()
-        $code = 'param($kind,$body,$snapshot,$fail) if ($kind -eq "Copy") { Start-Sleep -Milliseconds 220; if ($fail) { throw "Synthetic copy failure" }; [pscustomobject]@{id=("copy-" + $body.content);content=$body.content;due=@{date=$body.due_date};checked=$false} } elseif ($kind -eq "Load") { $snapshot }'
-        $fail = $script:failNext -and $Kind -eq 'Copy'
-        if ($fail) { $script:failNext = $false }
-        $worker.AddScript($code).AddArgument($Kind).AddArgument($Body).AddArgument([object[]]@($script:cachedTasks)).AddArgument($fail) | Out-Null
+        $worker.AddScript('throw "Fixture offline"') | Out-Null
         $handle = $worker.BeginInvoke()
         $script:jobs.Add(@{Worker=$worker; Handle=$handle; Kind=$Kind; Context=$Context})
     }
 
     $window.Topmost = $false
+    $window.ShowActivated = $false
+    $window.Opacity = 0
     $window.Show()
-    $window.UpdateLayout()
-    $script:token = 'synthetic-test-token'
+    $ui.HistoryMenuItem.RaiseEvent([Windows.RoutedEventArgs]::new([Windows.Controls.MenuItem]::ClickEvent))
+    Assert ($null -ne $script:historyWindow -and $script:historyWindow.IsVisible) 'The completed-history menu did not open its window.'
+    Assert ($script:historyUi.HistoryStatus.Text.Contains('关联')) 'History did not explain the missing account connection.'
+    Assert ($script:testRequests.Count -eq 0) 'History made an API call without a token.'
+    $script:historyWindow.Close()
+
+    $script:token = 'isolated-task-copy-token'
+    Initialize-TaskWorkflow
     $past = [DateTime]::Today.AddDays(-2)
     $pastKey = $past.ToString('yyyy-MM-dd')
-    $script:date = $past
-    $script:cachedTasks = @(
-        @{id='old-a';content='只复制第一条';due=@{date=$pastKey};checked=$false;order=1},
-        @{id='old-b';content='稍后复制第二条';due=@{date=$pastKey};checked=$false;order=2},
-        @{id='old-complete';content='不应再复制';due=@{date=$pastKey};checked=$true;order=3}
+    $todayKey = [DateTime]::Today.ToString('yyyy-MM-dd')
+    Set-OfflineTaskSnapshot -Context $script:offlineContext -Tasks @(
+        [pscustomobject]@{id='old-a'; content='只复制第一条'; due=@{date=$pastKey}; checked=$false; order=1},
+        [pscustomobject]@{id='old-b'; content='稍后复制第二条'; due=@{date=$pastKey}; checked=$false; order=2},
+        [pscustomobject]@{id='old-complete'; content='不应再复制'; due=@{date=$pastKey}; checked=$true; order=3}
     )
+    Update-TaskProjection
+    $script:date = $past
     Render-Tasks
-    Assert-Equal $ui.Tasks.Children.Count 2 'Past list excludes completed tasks and shows both incomplete tasks'
+    Assert-Equal $ui.Tasks.Children.Count 2 'Past list should show only its two incomplete tasks'
+
     $first = Find-CopyButton '只复制第一条'
-    Assert-Equal $first.Content '复制到今天' 'Each row has its own copy control'
-    Click-Copy $first
-    Assert-Equal $script:copyPending.Count 1 'First task is pending without blocking UI'
-    Assert-Equal $first.IsEnabled $false 'Pending copy button is disabled'
+    Assert-Equal $first.Content '复制到今天' 'Each past task should have its own copy control'
+    Click-Button $first
+    Assert-Equal $script:offlineContext.Store.Queue.Count 1 'The selected task was not durably queued'
+    $copyOperation = $script:offlineContext.Store.Queue[0]
+    Assert ($copyOperation.Kind -eq 'Copy' -and $copyOperation.SourceId -eq 'old-a') 'The wrong source task was copied'
+    Assert ($copyOperation.TargetDate -eq $todayKey -and $copyOperation.Payload.content -eq '只复制第一条') 'The copy payload or target date was wrong'
+    Assert-Equal (Find-CopyButton '只复制第一条').Content '复制中…' 'The source row should show pending copy state'
+    Assert (!(Find-CopyButton '只复制第一条').IsEnabled) 'The pending copy button should be disabled'
     Copy-TaskToToday $first
-    Assert-Equal @($script:testRequests | Where-Object Kind -eq 'Copy').Count 1 'Repeated click did not enqueue duplicate creation'
-    Assert-Equal $script:testRequests[0].Body.content '只复制第一条' 'Creation payload contains only selected task'
-    Assert-Equal $script:testRequests[0].Body.due_date ([DateTime]::Today.ToString('yyyy-MM-dd')) 'Creation targets today'
-
+    Assert-Equal $script:offlineContext.Store.Queue.Count 1 'Repeated click created a duplicate copy operation'
+    Assert-Equal @($script:testRequests | Where-Object Kind -eq 'Sync').Count 1 'Only one first sync attempt should start'
     $script:date = [DateTime]::Today
     Render-Tasks
-    Assert-Equal $ui.Tasks.Children.Count 0 'Today remains usable while copy runs'
-    $script:date = $past
-    Render-Tasks
-    Assert-Equal (Find-CopyButton '只复制第一条').Content '复制中…' 'Pending state survives a view refresh'
+    Assert-Equal $ui.Tasks.Children.Count 1 'Today should immediately show the offline copy'
+    Assert ($ui.Tasks.Children[0].Child.Children[1].Text.Contains('待同步')) 'The local copy is not labelled as pending'
+    Assert (!$ui.Tasks.Children[0].Child.Children[0].IsEnabled) 'A copy without a server ID should not be completable yet'
+
     $poll.Start()
-    Pump 850
-    Assert-Equal $script:copyPending.Count 0 'Pending state clears after success'
-    Assert-Equal (Find-CopyButton '只复制第一条').Content '已复制' 'Successful row shows durable feedback'
-    Assert-Equal (Find-CopyButton '只复制第一条').IsEnabled $false 'Successful row cannot accidentally be copied again'
-    Assert-Equal (Find-CopyButton '稍后复制第二条').Content '复制到今天' 'Other rows remain independently selectable'
-    Assert-Equal @($script:cachedTasks | Where-Object id -eq 'old-a').Count 1 'Original task remains in cache'
+    Pump 400
+    Assert ($script:offlineContext.Store.Queue[0].State -eq 'Pending') 'Network failure did not leave a retryable copy'
+    Assert ($ui.Status.Text.Contains('本机')) 'The copy did not report that it was saved locally'
+    $firstId = $copyOperation.Id
+    Initialize-TaskWorkflow
+    $script:nextSyncAttempt = [DateTime]::Now.AddMinutes(1)
+    Assert ($script:offlineContext.Store.Queue.Count -eq 1 -and $script:offlineContext.Store.Queue[0].Id -eq $firstId) 'Restart changed or lost the queued copy'
+    Update-TaskProjection
+    $script:date = $past
+    Render-Tasks
+    Assert-Equal (Find-CopyButton '只复制第一条').Content '复制中…' 'Pending copy feedback was lost after restart'
+    Assert-Equal (Find-CopyButton '稍后复制第二条').Content '复制到今天' 'The other past task is not independently selectable'
+
     $script:date = [DateTime]::Today
     Render-Tasks
-    Assert-Equal $ui.Tasks.Children.Count 1 'Only selected task appears on today after copying'
+    $ui.Input.Text = '本机新增'
+    Press-Return $ui.Input
+    Assert-Equal $script:offlineContext.Store.Queue.Count 2 'Pressing Enter did not queue a new task offline'
+    Assert-Equal $ui.Input.Text '' 'Successful local save did not clear the input'
+    Assert (@($script:offlineContext.Store.Queue | Where-Object { $_.Kind -eq 'Add' -and $_.Payload.content -eq '本机新增' }).Count -eq 1) 'The add operation payload was not saved'
+    Assert-Equal $ui.Tasks.Children.Count 2 'Today should show both the offline copy and offline new task'
+    Assert-Equal @($script:testRequests | Where-Object Kind -eq 'Sync').Count 1 'Offline backoff should not cause an immediate repeated network attempt'
 
     $script:date = $past
     Render-Tasks
-    $script:failNext = $true
-    Click-Copy (Find-CopyButton '稍后复制第二条')
-    Assert-Equal (Find-CopyButton '稍后复制第二条').IsEnabled $false 'Second row independently enters pending state'
-    Pump 600
-    Assert-Equal $script:copyPending.Count 0 'Failed copy clears pending state'
-    Assert-Equal (Find-CopyButton '稍后复制第二条').IsEnabled $true 'Failed row becomes retryable'
-    if ($ui.Status.Text -notlike '复制失败*') { throw 'Copy error feedback is missing.' }
-    Click-Copy (Find-CopyButton '稍后复制第二条')
-    Pump 850
-    Assert-Equal (Find-CopyButton '稍后复制第二条').Content '已复制' 'Retry succeeds for second row'
-    Assert-Equal @($script:testRequests | Where-Object Kind -eq 'Copy').Count 3 'Two selected tasks plus one retry issued exactly three create requests'
-    Write-Output 'PASS: one-row copy, duplicate guard, async feedback, retained source, independent rows, and failure retry.'
-}
-finally {
-    if ($window) { $window.Close() }
+    Click-Button (Find-CopyButton '稍后复制第二条')
+    Assert-Equal $script:offlineContext.Store.Queue.Count 3 'The second past task was not copied independently'
+    Assert-Equal (Find-CopyButton '稍后复制第二条').Content '复制中…' 'Second row pending state was not shown'
+    Assert-Equal (Find-CopyButton '只复制第一条').Content '复制中…' 'First row pending state unexpectedly changed'
+    Assert (@($script:cachedTasks | Where-Object id -eq 'old-a').Count -eq 1) 'Copying removed the original task'
+
+    Complete-OfflineTaskOperation -Context $script:offlineContext -Id $firstId -Response @{
+        sync_status = @{ $($firstId) = 'ok' }
+        temp_id_mapping = @{ $($copyOperation.TempId) = 'server-copy-a' }
+    } | Out-Null
+    Update-TaskProjection
+    Render-Tasks
+    Assert-Equal (Find-CopyButton '只复制第一条').Content '已复制' 'Acknowledged copy does not show durable feedback'
+    Assert (!(Find-CopyButton '只复制第一条').IsEnabled) 'Acknowledged copy should not be copied twice'
+    $reopened = Open-OfflineTaskStore -DataDir $testDirectory -Token $script:token
+    Assert ($reopened.Store.CopyReceipts.ContainsKey('old-a|' + $todayKey)) 'The copy receipt was not saved across restart'
+    Write-Output 'PASS: isolated history entry, per-row offline copy, duplicate guard, add via Enter, restart projection, and durable copy receipt.'
+} finally {
+    if ($null -ne $window) { $window.Close() }
     $resolvedTarget = [IO.Path]::GetFullPath($testDirectory).TrimEnd('\')
     if ([IO.Path]::GetDirectoryName($resolvedTarget) -cne $root -or [IO.Path]::GetFileName($resolvedTarget) -cne $folderName -or $resolvedTarget -ceq $root) {
         throw 'Refusing cleanup outside the exact test directory.'

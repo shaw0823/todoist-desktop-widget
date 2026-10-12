@@ -53,7 +53,7 @@ function Assert-NoRequestsSince([int]$Count, [string]$Message) {
 
 try {
     $source = [IO.File]::ReadAllText((Join-Path $PSScriptRoot 'Start.ps1'))
-    foreach ($module in 'Runtime.ps1', 'Theme.ps1', 'Background.ps1', 'Calendar.ps1','TaskCopy.ps1', 'FollowSettings.ps1','WindowPosition.ps1','ClockSettings.ps1','DisplaySettings.ps1','Tray.ps1') {
+    foreach ($module in 'Runtime.ps1', 'Theme.ps1', 'Background.ps1', 'Calendar.ps1','TaskCopy.ps1', 'FollowSettings.ps1','WindowPosition.ps1','ClockSettings.ps1','DisplaySettings.ps1','Tray.ps1','History.ps1','HistoryUI.ps1','OfflineTasks.ps1','Reminders.ps1','ReminderPopup.ps1','TaskWorkflow.ps1') {
         $modulePath = (Join-Path $PSScriptRoot $module).Replace("'", "''")
         $source = $source.Replace(". (Join-Path `$PSScriptRoot '$module')", ". '$modulePath'")
     }
@@ -67,7 +67,8 @@ try {
     $source = $source.Replace("`$tokenPath = Join-Path `$dataDir 'token.dat'", "`$tokenPath = '$fixtureTokenPath'")
     $source = $source.Replace('Todoist 桌面小组件', 'Todoist 日历测试')
     $source = $source.Replace('Start-WidgetMessageLoop -Window $window', '$timer.Stop(); $poll.Stop()')
-    Invoke-Expression $source
+    $source = $source.Replace('$window.Add_ContentRendered({ Initialize-TaskWorkflow; Render-Tasks; Load-Tasks; Start-NextOfflineSync; Check-TaskReminders })', '')
+Invoke-Expression $source
     Assert-Equal $dataDir $testDirectory 'Fixture uses isolated settings directory'
     Assert-Equal $tokenPath (Join-Path $testDirectory 'token.dat') 'Fixture uses isolated token path'
     Assert-Equal $script:token '' 'Fixture never reads the real Todoist token'
@@ -82,9 +83,15 @@ try {
     $script:originalStartRequest = ${function:Start-Request}
     function Start-Request($Kind, $Method, $Path, $Body, $Context) {
         $script:testRequests.Add(@{ Kind = $Kind; Path = $Path })
-        & $script:originalStartRequest $Kind $Method $Path $Body $Context
+        if ($Kind -eq 'Sync') {
+            $worker = [PowerShell]::Create()
+            $worker.AddScript('Start-Sleep -Milliseconds 450; throw "Fixture offline"') | Out-Null
+            $handle = $worker.BeginInvoke()
+            $script:jobs.Add(@{ Worker=$worker; Handle=$handle; Kind=$Kind; Context=$Context })
+        } else {
+            & $script:originalStartRequest $Kind $Method $Path $Body $Context
+        }
     }
-
     $window.Topmost = $false
     $window.Show()
     $window.UpdateLayout()
@@ -191,53 +198,41 @@ try {
     Invoke-TestButton $ui.Previous
     Assert-Equal $script:date.Date ([datetime]'2026-07-27') 'Daily previous still advances one day'
 
-    # Completion remains one asynchronous request when views change before it finishes.
-    $script:token = 'synthetic-test-token'
+    # Completion remains local and visible as an animation while the views switch.
+    $script:token = 'synthetic-calendar-token'
+    Initialize-TaskWorkflow
     $script:date = [datetime]'2026-08-20'
-    $script:cachedTasks = @((New-FixtureTask 'completion-success' 'Synthetic completion success' '2026-08-20'))
+    Set-OfflineTaskSnapshot -Context $script:offlineContext -Tasks @((New-FixtureTask 'completion-one' 'Synthetic completion' '2026-08-20'))
+    Update-TaskProjection
     Render-Tasks
     $window.UpdateLayout()
     $state = $ui.Tasks.Children[0].Child.Children[0].Tag
     $state.Check.IsChecked = $true
     Animate-Complete $state.Check
+    $operation = $script:offlineContext.Store.Queue[0]
+    Assert-Equal $operation.Kind 'Close' 'Completion creates a durable close operation'
     $requestCount = $script:testRequests.Count
     Set-WidgetView 'Calendar'
     $window.UpdateLayout()
-    if ([string](Find-DateCell $script:date).ToolTip -like '*Synthetic completion success*') { throw 'Calendar still previews a pending completed task.' }
+    if ([string](Find-DateCell $script:date).ToolTip -like '*Synthetic completion*') { throw 'Calendar still previews a locally completed task.' }
     Set-WidgetView 'List'
     $window.UpdateLayout()
-    Assert-Equal $script:pending.Count 1 'Pending completion survives view roundtrip'
-    Assert-Equal $ui.Tasks.Children.Count 1 'Daily view preserves pending animated row'
-    if (![object]::ReferenceEquals($ui.Tasks.Children[0], $state.Border)) { throw 'Pending row was recreated, losing completion state.' }
-    Assert-Equal $state.Check.IsEnabled $false 'Pending task stays disabled after view roundtrip'
-    Assert-Equal $state.Check.IsChecked $true 'Pending task keeps its check mark after view roundtrip'
+    Assert-Equal $script:pending.Count 1 'Animated completion survives view roundtrip'
+    Assert-Equal $ui.Tasks.Children.Count 1 'Daily view preserves the animating row'
+    if (![object]::ReferenceEquals($ui.Tasks.Children[0], $state.Border)) { throw 'Animating row was recreated during the view switch.' }
+    Assert-Equal $state.Check.IsEnabled $false 'Locally completed task stays disabled'
+    Assert-Equal $state.Check.IsChecked $true 'Locally completed task keeps its check mark'
     Animate-Complete $state.Check
-    Assert-NoRequestsSince $requestCount 'Pending task cannot issue duplicate completion request'
+    Assert-NoRequestsSince $requestCount 'Repeated completion cannot issue another sync request'
     $poll.Start()
-    Pump 1700
-    Assert-Equal $script:pending.Count 0 'Successful completion finishes after switching views'
-    Assert-Equal $ui.Tasks.Children.Count 0 'Completed row is removed'
-    Assert-Equal @($script:testRequests | Where-Object { $_.Kind -eq 'Close' -and $_.Path -like '*completion-success*' }).Count 1 'Exactly one successful completion request was made'
-
-    $script:cachedTasks = @((New-FixtureTask 'completion-failure' 'Synthetic completion failure' '2026-08-20'))
-    Render-Tasks
-    $window.UpdateLayout()
-    $state = $ui.Tasks.Children[0].Child.Children[0].Tag
-    $state.Check.IsChecked = $true
-    Animate-Complete $state.Check
-    $requestCount = $script:testRequests.Count
+    Pump 1300
+    Assert-Equal $script:pending.Count 0 'Completion animation finishes after switching views'
+    Assert-Equal $ui.Tasks.Children.Count 0 'Completed row is removed even while offline'
+    Assert-Equal $script:offlineContext.Store.Queue.Count 1 'Offline completion was not preserved'
+    Assert-Equal $script:offlineContext.Store.Queue[0].Id $operation.Id 'Network failure changed completion ID'
+    Assert-Equal $script:offlineContext.Store.Queue[0].State 'Pending' 'Offline completion should be retryable'
     Set-WidgetView 'Calendar'
-    Set-WidgetView 'List'
-    Assert-NoRequestsSince $requestCount 'Failure roundtrip does not issue another API request'
-    Pump 850
-    Assert-Equal $script:pending.Count 0 'Failed completion rolls back pending state'
-    Assert-Equal $ui.Tasks.Children.Count 1 'Failed completion restores daily task'
-    $restoredCheck = $ui.Tasks.Children[0].Child.Children[0]
-    Assert-Equal $restoredCheck.IsEnabled $true 'Rolled back task can be completed again'
-    Assert-Equal $restoredCheck.IsChecked $false 'Rolled back task is unchecked'
-    Set-WidgetView 'Calendar'
-    if ([string](Find-DateCell $script:date).ToolTip -notlike '*Synthetic completion failure*') { throw 'Rolled back task did not return to calendar.' }
-
+    if ([string](Find-DateCell $script:date).ToolTip -like '*Synthetic completion*') { throw 'Offline completion reappeared in calendar.' }
     Write-Output 'PASS: month grid, adaptive task previews, live theme colors, date navigation, view size roundtrip, and asynchronous completion during view switches.'
 }
 finally {

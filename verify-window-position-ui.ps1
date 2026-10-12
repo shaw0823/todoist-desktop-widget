@@ -52,7 +52,7 @@ function Assert-Reachable {
 
 try {
     $source = [IO.File]::ReadAllText((Join-Path $root 'Start.ps1'))
-    foreach ($module in 'Runtime.ps1','Theme.ps1','Background.ps1','Calendar.ps1','TaskCopy.ps1','FollowSettings.ps1','WindowPosition.ps1','ClockSettings.ps1','DisplaySettings.ps1','Tray.ps1') {
+    foreach ($module in 'Runtime.ps1','Theme.ps1','Background.ps1','Calendar.ps1','TaskCopy.ps1','FollowSettings.ps1','WindowPosition.ps1','ClockSettings.ps1','DisplaySettings.ps1','Tray.ps1','History.ps1','HistoryUI.ps1','OfflineTasks.ps1','Reminders.ps1','ReminderPopup.ps1','TaskWorkflow.ps1') {
         $modulePath = (Join-Path $root $module).Replace("'", "''")
         $source = $source.Replace(". (Join-Path `$PSScriptRoot '$module')", ". '$modulePath'")
     }
@@ -79,7 +79,8 @@ try {
         } elseif ($scenario -eq 'RightToLeftClose') {
             Save-DisplaySettings -Settings @{ShowClock=$true; ShowCalendar=$true; ShowList=$true; ViewExpansionDirection='RightToLeft'} -Path (Join-Path $testDirectory 'display.json')
         }
-        Invoke-Expression $source
+        $source = $source.Replace('$window.Add_ContentRendered({ Initialize-TaskWorkflow; Render-Tasks; Load-Tasks; Start-NextOfflineSync; Check-TaskReminders })', '')
+Invoke-Expression $source
         Assert-Equal $dataDir $testDirectory 'Data directory is isolated'
         Assert-Equal $tokenPath (Join-Path $testDirectory 'token.dat') 'Token path is isolated'
         Assert-Equal $windowPositionPath (Join-Path $testDirectory 'window-position.json') 'Position file is isolated'
